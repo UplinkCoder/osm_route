@@ -13,8 +13,9 @@ To run it:
 #include <set>
 #include "osmpbfreader.h"
 #include <iostream>
-#include <string>
+#include <string.h>
 #include <stdlib.h>
+#include <assert.h>
 #include "crc32.c"
 #include "string_view.hpp"
 
@@ -50,8 +51,9 @@ struct Serializer
 
     uint32_t position_in_buffer = 0;
     uint32_t buffer_used = 0;
-#define FLUSH_GRANULARITY 4092
-#define BUFFER_SIZE (FLUSH_GRANULARITY * 2)
+
+    static const int FLUSH_GRANULARITY = 4092;
+    static const int BUFFER_SIZE = (FLUSH_GRANULARITY * 2);
 
     uint8_t buffer[BUFFER_SIZE];
 private:
@@ -201,6 +203,40 @@ public:
        }
     }
 
+    /// May not write all the Data
+    /// Returns the number of bytes written
+    uint32_t WriteRawData(const void* data, uint32_t size)
+    {
+        if (position_in_buffer > FLUSH_GRANULARITY)
+            WriteFlush();
+
+        if (size > FLUSH_GRANULARITY)
+            size = FLUSH_GRANULARITY;
+
+        memcpy(buffer + position_in_buffer, data, size);
+        position_in_buffer += size;
+        assert(position_in_buffer < BUFFER_SIZE);
+
+        return size;
+    }
+
+    /// May not read all the Data
+    /// Returns the number of bytes read
+    uint32_t ReadRawData(void* data, uint32_t size)
+    {
+        if (position_in_buffer > FLUSH_GRANULARITY)
+            RefillBuffer();
+
+        if (size > FLUSH_GRANULARITY)
+            size = FLUSH_GRANULARITY;
+
+        memcpy(data, buffer + position_in_buffer, size);
+        position_in_buffer += size;
+        assert(position_in_buffer < BUFFER_SIZE);
+
+        return size;
+    }
+
     uint32_t ReadU32(void) {
         if (buffer_used - position_in_buffer < 4)
         {
@@ -221,8 +257,6 @@ public:
         (*(uint32_t*)(buffer + position_in_buffer)) = value;
         position_in_buffer += 4;
     }
-#undef BUFFER_SIZE
-#undef FLUSH_GRANULARITY
 } ;
 
 
@@ -325,6 +359,8 @@ struct StringTable
         return idx;
     }
 
+    ~StringTable() = default;
+
     StringTable(vector<const char*> primer = {}) : string_data(), strings(), crc32_to_indecies() {
         for(e : primer)
         {
@@ -418,8 +454,89 @@ struct StringTable
         return LookupString(str);
     }
 
-    vector<uint8_t> serialize () {
-        return {};
+    void Serialize (Serializer& serializer) {
+        // serialize string data.
+        // serializer.BeginField("vector<char>", "string_data");
+        {
+            serializer.WriteU32(string_data.size());
+            const auto begin = (const char*)string_data.data();
+            auto ptr = (const char*)string_data.data();
+            uint32_t size_left = string_data.size();
+            uint32_t bytes_written = 0;
+
+            do {
+                bytes_written = serializer.WriteRawData(string_data.data(), size_left);
+                ptr += bytes_written;
+                size_left -= bytes_written;
+            } while(bytes_written);
+            assert((uint32_t)(ptr - begin) == string_data.size());
+        }
+        // serializer.EndField();
+
+        // serializer.BeginField("vector<StringEntry>", "strings");
+        {
+            serializer.WriteU32(strings.size());
+            const auto begin = (const char*)string_data.data();
+            auto ptr = (const char*)string_data.data();
+            uint32_t size_left = (string_data.size() * sizeof(StringEntry));
+            uint32_t bytes_written = 0;
+
+            do {
+                bytes_written = serializer.WriteRawData(string_data.data(), size_left);
+                ptr += bytes_written;
+                size_left -= bytes_written;
+            } while(bytes_written);
+            assert((uint32_t)(ptr - begin) == string_data.size()
+                * sizeof(StringEntry));
+        }
+        // serializer.EndField();
+    }
+
+    void DeSerialize (Serializer& serializer) {
+        // serialize string data.
+        // serializer.BeginField("vector<char>", "string_data");
+        {
+            uint32_t n_chars = serializer.ReadU32();
+            string_data.resize(n_chars);
+
+            const auto begin = (const char*)string_data.data();
+            auto ptr = string_data.data();
+            uint32_t bytes_read = 0;
+            uint32_t size_left = n_chars;
+            do {
+                bytes_read = serializer.ReadRawData(ptr, size_left);
+                ptr += bytes_read;
+                size_left -= bytes_read;
+            } while(bytes_read);
+            assert((uint32_t)(ptr - begin) == string_data.size());
+        }
+        // serializer.EndField();
+        // serializer.BeginField("vector<StringEntry>", "strings");
+        {
+            uint32_t n_strings = serializer.ReadU32();
+            strings.resize(n_strings);
+
+            const auto begin = (const char*)string_data.data();
+            auto ptr = string_data.data();
+            uint32_t bytes_read = 0;
+            uint32_t size_left = n_strings * sizeof(StringEntry);
+            do {
+                bytes_read = serializer.ReadRawData(ptr, size_left);
+                ptr += bytes_read;
+                size_left -= bytes_read;
+            } while(bytes_read);
+            assert((uint32_t)(ptr - begin) == string_data.size()
+                * sizeof(StringEntry));
+        }
+        // serializer.EndField();
+
+        // now recreate the map
+        // crc32_to_indecies
+        int idx = 1;
+        for(auto& e : strings)
+        {
+            crc32_to_indecies.emplace(e.crc32, idx++);
+        }
     }
 };
 
