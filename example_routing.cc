@@ -46,20 +46,21 @@ struct Serializer
 
     uint32_t crc;
 
-    uint64_t bytes_in_file = 0;
-    uint64_t position_in_file = 0;
+    uint64_t bytes_in_file      = 0;
+    uint64_t position_in_file   = 0;
 
     uint32_t position_in_buffer = 0;
-    uint32_t buffer_used = 0;
+    uint32_t buffer_used        = 0;
 
-    static const int FLUSH_GRANULARITY = 4092;
-    static const int BUFFER_SIZE = (FLUSH_GRANULARITY * 2);
+    static const int FLUSH_GRANULARITY = 4096;
+    static const int BUFFER_SIZE       = (FLUSH_GRANULARITY * 2);
 
     uint8_t buffer[BUFFER_SIZE];
 private:
     void RefillBuffer(void)
     {
         uint64_t bytes_avilable = bytes_in_file - position_in_file;
+        assert(buffer_used >= position_in_buffer);
         const auto old_bytes_in_buffer = buffer_used - position_in_buffer;
 
         // assert(bytes_avilable > 0);
@@ -141,10 +142,10 @@ public:
                     assert(0);
                 }
                 fwrite(&versionNumber, sizeof(versionNumber), 1, fd); // write version number
-                // NOTE: crc is not valid yet we just write it as a place_holder
-                fwrite(&crc, sizeof(crc), 1, fd);
                 // placeholder for ~crc;
                 uint32_t invCrc = ~crc;
+                // NOTE: crc is not valid yet we just write it as a place_holder
+                fwrite(&crc, sizeof(crc), 1, fd);
                 fwrite(&invCrc, sizeof(invCrc), 1, fd);
                 assert(ftell(fd) == 16);
             }
@@ -157,7 +158,7 @@ public:
                 char magic[4];
                 uint32_t versionNumber;
                 int bytes_read = 0;
-                uint32_t invCrc;
+                uint32_t invCrc = ~crc;
                 bytes_read += fread(&magic, 1, sizeof(magic), fd);
                 bytes_read += fread(&versionNumber, 1, sizeof(versionNumber), fd);
                 bytes_read += fread(&crc, 1, sizeof(crc), fd);
@@ -174,7 +175,18 @@ public:
     ~Serializer()
     {
         // TODO maybe pad the file to a multiple of 4?
-        if (m_mode == serialize_mode_t::Writing) WriteFlush();
+        if (m_mode == serialize_mode_t::Writing)
+        {
+            WriteFlush();
+            fseek(fd, 8, SEEK_SET);
+            fwrite(&crc, 1, sizeof(crc), fd);
+            uint32_t invCrc = ~crc;
+            fwrite(&invCrc, 1, sizeof(invCrc), fd);
+        }
+        if (m_mode == serialize_mode_t::Reading)
+        {
+            assert(position_in_file == bytes_in_file);
+        }
         fclose(fd);
     }
 
@@ -224,14 +236,15 @@ public:
     /// Returns the number of bytes read
     uint32_t ReadRawData(void* data, uint32_t size)
     {
-        if (position_in_buffer > FLUSH_GRANULARITY)
+        if ((buffer_used - position_in_buffer) < FLUSH_GRANULARITY)
             RefillBuffer();
 
         if (size > FLUSH_GRANULARITY)
             size = FLUSH_GRANULARITY;
 
         memcpy(data, buffer + position_in_buffer, size);
-        position_in_buffer += size;
+        buffer_used -= size;
+        
         assert(position_in_buffer < BUFFER_SIZE);
 
         return size;
@@ -472,13 +485,17 @@ struct StringTable
             assert((uint32_t)(ptr - begin) == string_data.size());
         }
         // serializer.EndField();
-
+        
+        // we only need to store the number of strings as those are known
+        serializer.WriteU32(strings.size());
+ /*
         // serializer.BeginField("vector<StringEntry>", "strings");
         {
             serializer.WriteU32(strings.size());
             const auto begin = (const char*)string_data.data();
             auto ptr = (const char*)string_data.data();
             uint32_t size_left = (string_data.size() * sizeof(StringEntry));
+            printf("Probably: %d bytes wasted\n", size_left - (5 * string_data.size()));
             uint32_t bytes_written = 0;
 
             do {
@@ -490,6 +507,7 @@ struct StringTable
                 * sizeof(StringEntry));
         }
         // serializer.EndField();
+*/
     }
 
     void DeSerialize (Serializer& serializer) {
@@ -511,31 +529,40 @@ struct StringTable
             assert((uint32_t)(ptr - begin) == string_data.size());
         }
         // serializer.EndField();
-        // serializer.BeginField("vector<StringEntry>", "strings");
         {
-            uint32_t n_strings = serializer.ReadU32();
+            const char* string_ptr = string_data.data();
+            
+            auto n_strings = serializer.ReadU32();
             strings.resize(n_strings);
-
-            const auto begin = (const char*)string_data.data();
-            auto ptr = string_data.data();
-            uint32_t bytes_read = 0;
-            uint32_t size_left = n_strings * sizeof(StringEntry);
-            do {
-                bytes_read = serializer.ReadRawData(ptr, size_left);
-                ptr += bytes_read;
-                size_left -= bytes_read;
-            } while(bytes_read);
-            assert((uint32_t)(ptr - begin) == string_data.size()
-                * sizeof(StringEntry));
+            uint32_t offset = 0;
+            
+            for(StringEntry& e : strings)
+            {
+                e.offset = offset;
+                
+                uint32_t length = 0;
+                while(*string_ptr++) {length++;}
+                
+                e.length = length;
+                e.crc32 = FINALIZE_CRC32C(
+                    crc32c(inital_crc32c, string_ptr - length, length)
+                );
+                string_ptr++;
+                offset += length + 1;
+            }
+            
+            assert(offset == string_data.size());
+        // let's recreate the strings vector
         }
-        // serializer.EndField();
-
-        // now recreate the map
-        // crc32_to_indecies
-        int idx = 1;
-        for(auto& e : strings)
+        
         {
-            crc32_to_indecies.emplace(e.crc32, idx++);
+            // now recreate the map
+            // crc32_to_indecies
+            int idx = 1;
+            for(auto& e : strings)
+            {
+                crc32_to_indecies.emplace(e.crc32, idx++);
+            }
         }
     }
 };
@@ -782,13 +809,27 @@ int main(int argc, char** argv) {
         }
     }
 
-    Serializer s {"test.dat", Serializer::serialize_mode_t::Writing};
+    {
+        Serializer s {"test.dat", Serializer::serialize_mode_t::Writing};
 
-    // u32 -- number of tags names
-    // u32 -- string data length for tag names
-    s.WriteU32(serializeWays.tag_names.strings.size());
-    s.WriteU32(serializeWays.tag_names.string_data.size());
+        // u32 -- number of tags names
+        // u32 -- string data length for tag names
+        serializeWays.tag_names.Serialize(s);
+        serializeWays.tag_values.Serialize(s);
+    }
+    {
+        Serializer d {"test.dat", Serializer::serialize_mode_t::Reading};
 
+        StringTable d_tag_names {};
+        StringTable d_tag_values {};
+        
+        d_tag_names.DeSerialize(d);
+        d_tag_values.DeSerialize(d);
+        
+        printf("deserilzed tag-keys: %d\n", (int)d_tag_names.strings.size());
+        printf("deserilzed tag-values: %d\n", (int)d_tag_values.strings.size());
+
+    }
     return 0;
 }
 
