@@ -1,8 +1,13 @@
 #include <stdint.h>
-#include <stdio.h>
-#include <string.h>
+
 #ifdef ARM_NEON_CRC32C
-#include <arm_acle.h>
+#  include <arm_acle.h>
+#endif
+
+#ifdef __cplusplus
+#  define EXTERN_C extern "C"
+#else
+#  define EXTERN_C extern
 #endif
 
 static const uint32_t crc32Table[256] = {
@@ -76,21 +81,23 @@ static inline uint32_t singletable_crc32c(uint32_t crc, const uint8_t *buf, uint
 {
     const uint8_t *p = buf;
 
-
+#ifdef BY_4_OPT
     uint32_t size4 = size / 4;
     while(size4--)
     {
-        crc = crc32Table[(crc ^ *(p + 0)) & 0xff] ^ (crc >> 8);
-        crc = crc32Table[(crc ^ *(p + 1)) & 0xff] ^ (crc >> 8);
-        crc = crc32Table[(crc ^ *(p + 2)) & 0xff] ^ (crc >> 8);
-        crc = crc32Table[(crc ^ *(p + 3)) & 0xff] ^ (crc >> 8);
+        const uint32_t fetch = *(uint32_t*)p;
+
+        crc = crc32Table[(crc ^ ((fetch >>  0))) & 0xff] ^ (crc >> 8);
+        crc = crc32Table[(crc ^ ((fetch >>  8))) & 0xff] ^ (crc >> 8);
+        crc = crc32Table[(crc ^ ((fetch >> 16))) & 0xff] ^ (crc >> 8);
+        crc = crc32Table[(crc ^ ((fetch >> 24))) & 0xff] ^ (crc >> 8);
         p += 4;
     }
 
-    uint32_t rem = size & 3;
+    size = size & 3;
+#endif
 
-
-    while (rem--)
+    while (size--)
         crc = crc32Table[(crc ^ *p++) & 0xff] ^ (crc >> 8);
 
     return crc;
@@ -98,7 +105,7 @@ static inline uint32_t singletable_crc32c(uint32_t crc, const uint8_t *buf, uint
 
 #ifdef ARM_NEON_CRC32C
 
-uint32_t makeTable(uint32_t* result, uint8_t initValue)
+static uint32_t makeTable(uint32_t* result, uint8_t initValue)
 {
     for(int i = 0; i < 256; i++)
     {
@@ -109,34 +116,39 @@ uint32_t makeTable(uint32_t* result, uint8_t initValue)
     return result;
 }
 
-uint32_t calc_intrinsic(char* s)
+uint32_t calc_intrinsic(uint32_t crc, const void* s, const uint32_t len)
 {
-    uint32_t len = (uint32_t) strlen(s);
-    uint8_t* p = s;
-    uint32_t crc = ~0;
+    const uint8_t* p = (const uint8_t*) s;
 
     while(len--)
     {
         const uint8_t c = *(p++);
         crc = __crc32cb(crc, c);
     }
-    return crc ^ (~0);
+    return crc;
 
 }
 
 #endif
+static const uint32_t inital_crc32c = ~0;
+#define FINALIZE_CRC32C(CRC) \
+    CRC ^ 0xFFFFFFFF;
 
-extern "C" uint32_t calc_table(const char* s, const uint32_t len_p = 0)
+EXTERN_C uint32_t crc32c(uint32_t crc, const void* s, const uint32_t len_p)
 {
-    const uint32_t len = len_p ? len_p : (uint32_t) strlen(s);
+    const uint32_t len = len_p;
     const uint8_t* p = (const uint8_t*) s;
-    uint32_t crc = ~0;
 
     crc = singletable_crc32c(crc, p, len);
-    return crc ^ ~0;
+
+    return crc;
 }
 
+#define CRC32C_S(STRING) \
+    (crc32c(~0, STRING, sizeof(STRING) - 1) ^ ~0)
+
 #ifdef TEST_MAIN
+#include <stdio.h>
 void printTable(int32_t* table, int n)
 {
     for(int i = 0; i < 256; i += 8)
@@ -155,17 +167,36 @@ void printTable(int32_t* table, int n)
     }
 }
 
-void main()
+#include <time.h>
+int main(int argc, char* argv[])
 {
-    printf("crc32c of 'hello' is: %x\n", calc_table("hello"));
+    clock_t t1 = clock();
+
+    uint32_t crc32c_test1 = (crc32c(~0, crc32Table, sizeof(crc32Table)) ^ inital_crc32c);
+    uint32_t crc32c_test2 = (crc32c(~0, crc32Table, sizeof(crc32Table)) ^ inital_crc32c);
+    uint32_t crc32c_test3 = (crc32c(~0, crc32Table, sizeof(crc32Table)) ^ inital_crc32c);
+    uint32_t crc32c_test4 = (crc32c(~0, crc32Table, sizeof(crc32Table)) ^ inital_crc32c);
+    uint32_t crc32c_test5 = (crc32c(~0, crc32Table, sizeof(crc32Table)) ^ inital_crc32c);
+    uint32_t crc32c_test6 = (crc32c(~0, crc32Table, sizeof(crc32Table)) ^ inital_crc32c);
+    uint32_t crc32c_test7 = (crc32c(~0, crc32Table, sizeof(crc32Table)) ^ inital_crc32c);
+    uint32_t crc32c_test8 = (crc32c(~0, crc32Table, sizeof(crc32Table)) ^ inital_crc32c);
+    clock_t t2 = clock();
+
+    printf("crc32c of 'hello' is: %x\n", CRC32C_S("hello"));
+
+    printf("clock diff is : %lu\n", t2 - t1);
 
 #  ifdef ARM_NEON_CRC32C
-    printf("crc32c of 'hello' according to neon is: %x\n", calc_intrinsic("hello") );
+#define CRC32C_I_S(STRING) \
+    calc_intrinsic(STRING, sizeof(STRING) - 1)
+
+    printf("crc32c of 'hello' according to neon is: %x\n", CRC32_I_S("hello") );
 
     int32_t t[256];
 
     // makeTable(t, 0);
     // printTable(t, 256);
 #  endif // ARM_NEON_CRC32C
+#undef CRC32C_S
 }
 #endif // TEST_MAIN

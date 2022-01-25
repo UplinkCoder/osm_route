@@ -25,6 +25,8 @@ using namespace std;
 using short_tags_t = unordered_map<uint32_t, uint32_t>;
 using namespace bpstd;
 
+void test_serializer(void);
+
 struct Offsets
 {
    const uint32_t NameTable = 0;
@@ -41,22 +43,24 @@ struct Serializer
     const char* m_filename;
     serialize_mode_t m_mode;
 
-	uint32_t crc;
+    uint32_t crc;
 
     uint64_t bytes_in_file = 0;
     uint64_t position_in_file = 0;
 
     uint32_t position_in_buffer = 0;
     uint32_t buffer_used = 0;
-#define BUFFER_SIZE 1024
+#define FLUSH_GRANULARITY 4092
+#define BUFFER_SIZE (FLUSH_GRANULARITY * 2)
+
     uint8_t buffer[BUFFER_SIZE];
 private:
     void RefillBuffer(void)
     {
-        uint64_t bytes_avilable = bytes_in_file - position_in_file > 0;
+        uint64_t bytes_avilable = bytes_in_file - position_in_file;
         const auto old_bytes_in_buffer = buffer_used - position_in_buffer;
 
-        assert(bytes_avilable > 0);
+        // assert(bytes_avilable > 0);
 
         uint32_t size_to_read = BUFFER_SIZE - buffer_used;
         if (bytes_avilable < size_to_read)
@@ -65,6 +69,8 @@ private:
         memmove(buffer, buffer + position_in_buffer, old_bytes_in_buffer);
         auto bytes_read = fread(buffer + old_bytes_in_buffer, 1, size_to_read, fd);
         assert(bytes_read == size_to_read);
+        buffer_used = old_bytes_in_buffer + bytes_read;
+        position_in_buffer = 0;
 
         position_in_file += size_to_read;
     }
@@ -72,7 +78,8 @@ public:
     uint32_t ReadShortInt(void) {
         assert(position_in_buffer < buffer_used);
 
-        if (position_in_buffer > (1024 - 4) && bytes_in_file - position_in_file > 0)
+        if ((buffer_used - position_in_buffer) < 4
+            && bytes_in_file - position_in_file > 0)
         {
             RefillBuffer();
         }
@@ -81,38 +88,41 @@ public:
 
         auto mem = buffer + position_in_buffer;
         const auto first_byte = *mem++;
-		buffer_used--;
-		
+        position_in_buffer++;
+
         uint32_t result = first_byte & 0x7f;
         const auto is_long = (first_byte & 0x80) != 0;
         if (is_long)
         {
-			// read next 3 bytes
-			result |= ((*(uint32_t*)mem) & 0xffffff) << 7;
-			mem += 3;
-			buffer_used -= 3; 
-		}
+            // read next 3 bytes
+            result |= ((*(uint32_t*)mem) & 0xffffff) << 7;
+            position_in_buffer += 3;
+        }
+
+        return result;
     }
 
     uint32_t WriteFlush()
     {
-        uint32_t bytes_to_flush = 512;
+        uint32_t bytes_to_flush = FLUSH_GRANULARITY;
         if (position_in_buffer < bytes_to_flush)
             bytes_to_flush = position_in_buffer;
 
+        crc = crc32c(crc, buffer, bytes_to_flush);
         fwrite(buffer, 1, bytes_to_flush, fd);
 
         position_in_buffer -= bytes_to_flush;
         // cpy overhang
         memmove(buffer, buffer + bytes_to_flush, position_in_buffer);
+
+        return bytes_to_flush;
     }
 
 
     Serializer(const char* filename, serialize_mode_t mode) :
         m_filename(filename), m_mode(mode)  {
-        
         fd = fopen(filename, m_mode == serialize_mode_t::Writing ? "wb" : "rb");
-        
+
         if (!fd)
         {
             perror("Serializer()");
@@ -131,18 +141,31 @@ public:
                 fwrite(&versionNumber, sizeof(versionNumber), 1, fd); // write version number
                 // NOTE: crc is not valid yet we just write it as a place_holder
                 fwrite(&crc, sizeof(crc), 1, fd);
-                assert(ftell(fd) == 12);        
+                // placeholder for ~crc;
+                uint32_t invCrc = ~crc;
+                fwrite(&invCrc, sizeof(invCrc), 1, fd);
+                assert(ftell(fd) == 16);
             }
             else
             {
-				char magic[4];
-				uint32_t versionNumber;
-				fread(&magic, sizeof(magic), 1, fd);
-				fread(&versionNumber, sizeof(versionNumber), 1, fd);
-				fread(&crc, sizeof(crc), 1, fd);
-				assert(ftell(fd) == 12);
-				assert(0 == memcmp(&magic, "OSMb", 4)); 
-			}
+                fseek(fd, 0, SEEK_END);
+                bytes_in_file = ftell(fd);
+                fseek(fd, 0, SEEK_SET);
+
+                char magic[4];
+                uint32_t versionNumber;
+                int bytes_read = 0;
+                uint32_t invCrc;
+                bytes_read += fread(&magic, 1, sizeof(magic), fd);
+                bytes_read += fread(&versionNumber, 1, sizeof(versionNumber), fd);
+                bytes_read += fread(&crc, 1, sizeof(crc), fd);
+                bytes_read += fread(&invCrc, 1, sizeof(invCrc), fd);
+
+                position_in_file = bytes_read;
+                assert(ftell(fd) == 16 && position_in_file == 16);
+                assert(0 == memcmp(&magic, "OSMb", 4));
+                assert(crc == ~invCrc);
+            }
         }
     }
 
@@ -156,11 +179,11 @@ public:
     // Returns number of bytes written. 0 means error.
     uint8_t WriteShortInt(uint32_t value) {
        if(value >= 0x80000000)
-			return 0;
+            return 0;
 
-       if (position_in_buffer >= 512)
+       if (position_in_buffer >= FLUSH_GRANULARITY)
        {
-           // try to flush in 512 chunks
+           // try to flush in 4092 chunks
            WriteFlush();
        }
        if (value < 0x80)
@@ -170,29 +193,28 @@ public:
        }
        else
        {
-		   buffer[position_in_buffer++] = (uint8_t)(value | 0x80);
-		   buffer[position_in_buffer++] = (uint8_t)value >> 7;
-		   buffer[position_in_buffer++] = (uint8_t)value >> 15;
-		   buffer[position_in_buffer++] = (uint8_t)value >> 23;
-		   return 4;
-	   }
+           buffer[position_in_buffer++] = (uint8_t)(value | 0x80);
+           buffer[position_in_buffer++] = (uint8_t)(value >>  7);
+           buffer[position_in_buffer++] = (uint8_t)(value >> 15);
+           buffer[position_in_buffer++] = (uint8_t)(value >> 23);
+           return 4;
+       }
     }
 
     uint32_t ReadU32(void) {
-        if (position_in_buffer < buffer_used - 4)
+        if (buffer_used - position_in_buffer < 4)
         {
             RefillBuffer();
         }
-        assert(buffer_used - position_in_buffer <= 4);
+        assert(buffer_used - position_in_buffer >= 4);
         uint32_t result =  (*(uint32_t*)(buffer + position_in_buffer));
         position_in_buffer += 4;
         return result;
     }
 
     void WriteU32(uint32_t value) {
-       if (position_in_buffer >= 512)
+       if (position_in_buffer >= FLUSH_GRANULARITY)
        {
-           // try to flush in 512 chunks
            WriteFlush();
        }
 
@@ -200,6 +222,7 @@ public:
         position_in_buffer += 4;
     }
 #undef BUFFER_SIZE
+#undef FLUSH_GRANULARITY
 } ;
 
 
@@ -269,7 +292,8 @@ struct StringTable
     uint32_t AddString(const string_view & str) {
         // cerr << "called " << __FUNCTION__ << " (" << str << ")" << endl;
 
-        const auto crc = calc_table(str.data(), str.size());
+        const auto crc =
+            FINALIZE_CRC32C(crc32c(inital_crc32c, str.data(), str.size()));
         uint32_t idx = 0;
 
         for (auto it = crc32_to_indecies.find(crc);
@@ -305,7 +329,7 @@ struct StringTable
         for(e : primer)
         {
             AddString(string_view {e, strlen(e)} );
-        }      
+        }
     }
 
     // private:
@@ -353,7 +377,9 @@ struct StringTable
     uint32_t LookupString(const string_view& str) {
         const char* str_data = str.data();
         const auto str_size = str.size();
-        const uint32_t crc_input = calc_table(str.data(), str.size());
+        const uint32_t crc_input =
+            FINALIZE_CRC32C(crc32c(inital_crc32c, str.data(), str.size()));
+
         uint idx = 0;
         // using entry_t = decltype(strings)::value_type;
         for (auto it = crc32_to_indecies.find(crc_input);
@@ -405,9 +431,9 @@ struct SerializeWays
     std::unordered_map<uint64_t, Node> nodes;
 
     set<uint32_t> street_names_indicies {};
-    StringTable tag_names { 
-#include "prime_names.h"
-};
+    StringTable tag_names {
+#        include "prime_names.h"
+    };
     StringTable tag_values {};
     vector<Way> ways;
 
@@ -519,6 +545,8 @@ struct Routing {
 };
 
 int main(int argc, char** argv) {
+    test_serializer();
+
      if(argc != 2 && argc != 3) {
         std::cout << "Usage: " << argv[0] << " file_to_read.osm.pbf" << std::endl;
         return 1;
@@ -563,7 +591,7 @@ int main(int argc, char** argv) {
 //    serializeWays.tag_values.ReorderByUsage();
 //    serializeWays.tag_names.ReorderByUsage();
 
-
+/*
     {
         #define A(IDX) \
             (float)array[IDX].second / (float)array[0].second, strings[array[IDX].first].c_str()
@@ -574,7 +602,7 @@ int main(int argc, char** argv) {
 
             for(int i = 0; i < 127; i += 10) {
                 printf("%d: %f ('%s'), %f ('%s'), %f ('%s'), %f ('%s'), %f ('%s') || %f ('%s'), %f ('%s'), %f ('%s'), %f ('%s'), %f ('%s')\n",
-                i, 
+                i,
                 A(i + 0), A(i + 1), A(i + 2), A(i + 3), A(i + 4),
                 A(i + 5), A(i + 6), A(i + 7), A(i + 8), A(i + 9));
             }
@@ -587,14 +615,14 @@ int main(int argc, char** argv) {
             for(int i = 0;  i < 180; i += 10)
             {
                 printf("%d: %f ('%s'), %f ('%s'), %f ('%s'), %f ('%s'), %f ('%s') || %f ('%s'), %f ('%s'), %f ('%s'), %f ('%s'), %f ('%s')\n",
-                i, 
+                i,
                 A(i + 0), A(i + 1), A(i + 2), A(i + 3), A(i + 4),
                 A(i + 5), A(i + 6), A(i + 7), A(i + 8), A(i + 9));
             }
         }
         #undef A
    }
-
+*/
 /*
  *   amenity : fast_food
   name : Asia-Imbiss
@@ -629,7 +657,7 @@ int main(int argc, char** argv) {
             && CanFind(node.tags, {amenity_nt_id, fast_food_vt_id})
         )
         {
-            printf("found the thingy thing ref: %llu\n", node.osmid);
+            printf("found the thingy thing ref: %lu\n", node.osmid);
         }
         else
         {
@@ -647,6 +675,25 @@ int main(int argc, char** argv) {
     return 0;
 }
 
+void test_serializer(void)
+{
+    using serialize_mode_t = Serializer::serialize_mode_t;
+
+    {
+        Serializer writer { "test_s.dat", serialize_mode_t::Writing };
+        writer.WriteU32(19);
+        writer.WriteShortInt(29);
+        writer.WriteShortInt(3000);
+    }
+    {
+        Serializer reader { "test_s.dat", serialize_mode_t::Reading };
+
+        assert(reader.ReadU32() == 19);
+        assert(reader.ReadShortInt() == 29);
+        int result = reader.ReadShortInt();
+        assert(result == 3000);
+    }
+}
 /*
  * building | yes • house • residential • garage
    source   | BAG • Bing • cadastre-dgi-fr␣source␣:␣Direction␣Générale␣des␣Impôts␣-␣Cadastre.␣Mise␣à␣jour␣:␣2010 • cadastre-dgi-fr␣source␣:␣Direction␣Générale␣des␣Impôts␣-␣Cadastre.␣Mise␣à␣jour␣:␣2011 • cadastre-dgi-fr␣source␣:␣Direction␣Générale␣des␣Impôts␣-␣Cadastre.␣Mise␣à␣jour␣:␣2012 • bing • NRCan-CanVec-10.0 • microsoft/BuildingFootprints • digitalglobe • YahooJapan/ALPSMAP
