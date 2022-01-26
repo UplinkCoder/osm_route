@@ -16,6 +16,7 @@ To run it:
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#define CRC32C_IMPLEMENTATION
 #include "crc32.c"
 
 #if (__cplusplus <= 201500)
@@ -111,7 +112,7 @@ struct StringTable
         // cerr << "called " << __FUNCTION__ << " (" << str << ")" << endl;
 
         const auto crc =
-            FINALIZE_CRC32C(crc32c(inital_crc32c, str.data(), str.size()));
+            FINALIZE_CRC32C(crc32c(INITIAL_CRC32C, str.data(), str.size()));
         uint32_t idx = 0;
 
         for (auto it = crc32_to_indecies.find(crc);
@@ -198,7 +199,7 @@ struct StringTable
         const char* str_data = str.data();
         const auto str_size = str.size();
         const uint32_t crc_input =
-            FINALIZE_CRC32C(crc32c(inital_crc32c, str.data(), str.size()));
+            FINALIZE_CRC32C(crc32c(INITIAL_CRC32C, str.data(), str.size()));
 
         uint idx = 0;
         // using entry_t = decltype(strings)::value_type;
@@ -306,7 +307,7 @@ struct StringTable
 
                 e.length = length;
                 e.crc32 = FINALIZE_CRC32C(
-                    crc32c(inital_crc32c, string_ptr, length)
+                    crc32c(INITIAL_CRC32C, string_ptr, length)
                 );
                 string_ptr += length;
                 string_ptr++;

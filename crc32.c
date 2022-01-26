@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+
 // ARM feature check disabled as the intrinsic is slow than using the lookup table
 //
 //#ifdef __ARM_FEATURE_CRC32
@@ -17,8 +18,18 @@
 #  define EXTERN_C extern
 #endif
 
+
+EXTERN_C uint32_t crc32c(uint32_t crc, const void* s, const uint32_t len_p);
+#define FINALIZE_CRC32C(CRC) \
+    CRC ^ 0xFFFFFFFF;
+#define INITIAL_CRC32C ((uint32_t)0xFFFFFFFF)
+
+#ifdef CRC32C_IMPLEMENTATION
+
+#pragma once
+
 #ifndef NO_CRC32C_TABLE
-static const uint32_t crc32Table[256] = {
+inline static const uint32_t crc32Table[256] = {
     0x00000000L, 0xF26B8303L, 0xE13B70F7L, 0x1350F3F4L,
     0xC79A971FL, 0x35F1141CL, 0x26A1E7E8L, 0xD4CA64EBL,
     0x8AD958CFL, 0x78B2DBCCL, 0x6BE22838L, 0x9989AB3BL,
@@ -140,9 +151,6 @@ static inline uint32_t intrinsic_crc32c(uint32_t crc, const void* s, uint32_t le
 }
 
 #endif
-static const uint32_t inital_crc32c = ~0;
-#define FINALIZE_CRC32C(CRC) \
-    CRC ^ 0xFFFFFFFF;
 
 EXTERN_C uint32_t crc32c(uint32_t crc, const void* s, const uint32_t len_p)
 {
@@ -212,3 +220,6 @@ int main(int argc, char* argv[])
 #undef CRC32C_S
 }
 #endif // TEST_MAIN
+#else
+
+#endif

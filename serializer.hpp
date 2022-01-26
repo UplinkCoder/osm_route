@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "crc32.c"
 
 struct Serializer
 {
@@ -24,146 +25,14 @@ struct Serializer
     uint32_t r_invCrc; // reader only
 
 private:
-    void ReadFlush(void)
-    {
-        assert(buffer_used >= position_in_buffer); // general invariant
-
-        const uint64_t bytes_available = bytes_in_file - position_in_file;
-        const auto old_bytes_in_buffer = buffer_used - position_in_buffer;
-
-        // assert(bytes_available > 0);
-
-        uint32_t size_to_read = BUFFER_SIZE - buffer_used;
-        if (bytes_available < size_to_read)
-            size_to_read = bytes_available;
-
-        memmove(buffer, buffer + position_in_buffer, old_bytes_in_buffer);
-        auto bytes_read = fread(buffer + old_bytes_in_buffer, 1, size_to_read, fd);
-        assert(bytes_read == size_to_read);
-
-        crc = crc32c(crc, buffer + old_bytes_in_buffer, size_to_read);
-
-        buffer_used = old_bytes_in_buffer + bytes_read;
-        position_in_buffer = 0;
-
-        position_in_file += size_to_read;
-    }
+    void ReadFlush(void);
 public:
-    uint32_t ReadShortUint(void) {
-        assert(position_in_buffer < buffer_used);
-
-        if ((buffer_used - position_in_buffer) < 4
-            && bytes_in_file - position_in_file > 0)
-        {
-            ReadFlush();
-        }
-
-        assert(buffer_used > 1);
-
-        auto mem = buffer + position_in_buffer;
-        const auto first_byte = *mem++;
-        position_in_buffer++;
-
-        uint32_t result = (first_byte & 0x7f);
-        const auto has_next = (first_byte & 0x80) != 0;
-        if (has_next)
-        {
-            const auto second_byte = *mem++;
-            position_in_buffer++;
-
-            result |= ((second_byte & 0x7f) << 7);
-            const auto has_next2 = (second_byte & 0x80) != 0;
-
-            // read next byte
-            if (has_next2)
-            {
-                result |= ((*(uint16_t*)mem) << 14);
-                position_in_buffer += 2;
-            }
-        }
-
-        return result;
-    }
-
-    uint32_t WriteFlush()
-    {
-        assert(m_mode == serialize_mode_t::Writing);
-
-        uint32_t bytes_to_flush = FLUSH_GRANULARITY;
-        if (position_in_buffer < bytes_to_flush)
-            bytes_to_flush = position_in_buffer;
-
-        crc = crc32c(crc, buffer, bytes_to_flush);
-        fwrite(buffer, 1, bytes_to_flush, fd);
-
-        position_in_file += bytes_to_flush;
-        position_in_buffer -= bytes_to_flush;
-        // cpy overhang
-        memmove(buffer, buffer + bytes_to_flush, position_in_buffer);
-
-        return bytes_to_flush;
-    }
+    uint32_t ReadShortUint(void);
+    uint32_t WriteFlush(void);
 
 
-    Serializer(const char* filename, serialize_mode_t mode) :
-        m_filename(filename), m_mode(mode), crc(~0)  {
-        fd = fopen(filename, m_mode == serialize_mode_t::Writing ? "wb" : "rb");
-
-        if (!fd)
-        {
-            perror("Serializer()");
-        }
-        else
-        {
-            if (mode == serialize_mode_t::Writing)
-            {
-                fwrite("OSMb", 4, 1, fd); // write magic number
-                uint32_t versionNumber = 1;
-                if (ferror(fd))
-                {
-                    perror("Serializer()");
-                    assert(0);
-                }
-                fwrite(&versionNumber, sizeof(versionNumber), 1, fd); // write version number
-                // placeholder for ~crc;
-                uint32_t invCrc = ~crc;
-                // NOTE: crc is not valid yet we just write it as a place_holder
-                fwrite(&crc, sizeof(crc), 1, fd);
-                fwrite(&invCrc, sizeof(invCrc), 1, fd);
-                assert(ftell(fd) == 16);
-            }
-            else
-            {
-                fseek(fd, 0, SEEK_END);
-                bytes_in_file = ftell(fd);
-                fseek(fd, 0, SEEK_SET);
-
-                int bytes_read = 0;
-
-                char magic[4];
-                bytes_read += fread(&magic, 1, sizeof(magic), fd);
-
-                uint32_t versionNumber;
-                bytes_read += fread(&versionNumber, 1, sizeof(versionNumber), fd);
-
-                uint32_t r_crc;
-                bytes_read += fread(&r_crc, 1, sizeof(r_crc), fd);
-
-                bytes_read += fread(&r_invCrc, 1, sizeof(r_invCrc), fd);
-                if(r_crc != ~r_invCrc)
-                {
-                    printf("read crc %x and invCrc %x \n", r_crc, r_invCrc);
-                    fprintf(stderr, "initial CRC check failed ... file '%s' is corrupted\n", m_filename);
-                    abort();
-                }
-
-                position_in_file = bytes_read;
-                assert(ftell(fd) == 16 && position_in_file == 16);
-                assert(0 == memcmp(&magic, "OSMb", 4));
-            }
-        }
-    }
-
+    Serializer(const char* filename, serialize_mode_t mode);
+        
     ~Serializer()
     {
         // TODO maybe pad the file to a multiple of 4?
@@ -322,3 +191,143 @@ public:
         } while (bytes_read); \
         assert(bytes_left == 0); \
     }
+
+
+void Serializer::ReadFlush(void)
+{
+    assert(buffer_used >= position_in_buffer); // general invariant
+
+    const uint64_t bytes_available = bytes_in_file - position_in_file;
+    const auto old_bytes_in_buffer = buffer_used - position_in_buffer;
+
+    // assert(bytes_available > 0);
+
+    uint32_t size_to_read = BUFFER_SIZE - buffer_used;
+    if (bytes_available < size_to_read)
+        size_to_read = bytes_available;
+
+    memmove(buffer, buffer + position_in_buffer, old_bytes_in_buffer);
+    auto bytes_read = fread(buffer + old_bytes_in_buffer, 1, size_to_read, fd);
+    assert(bytes_read == size_to_read);
+
+    crc = crc32c(crc, buffer + old_bytes_in_buffer, size_to_read);
+
+    buffer_used = old_bytes_in_buffer + bytes_read;
+    position_in_buffer = 0;
+
+    position_in_file += size_to_read;
+}
+
+uint32_t Serializer::ReadShortUint(void) {
+    assert(position_in_buffer < buffer_used);
+
+    if ((buffer_used - position_in_buffer) < 4
+        && bytes_in_file - position_in_file > 0)
+    {
+        ReadFlush();
+    }
+
+    assert(buffer_used > 1);
+
+    auto mem = buffer + position_in_buffer;
+    const auto first_byte = *mem++;
+    position_in_buffer++;
+
+    uint32_t result = (first_byte & 0x7f);
+    const auto has_next = (first_byte & 0x80) != 0;
+    if (has_next)
+    {
+        const auto second_byte = *mem++;
+        position_in_buffer++;
+
+        result |= ((second_byte & 0x7f) << 7);
+        const auto has_next2 = (second_byte & 0x80) != 0;
+
+        // read next byte
+        if (has_next2)
+        {
+            result |= ((*(uint16_t*)mem) << 14);
+            position_in_buffer += 2;
+        }
+    }
+
+    return result;
+}
+
+uint32_t Serializer::WriteFlush(void)
+{
+    assert(m_mode == serialize_mode_t::Writing);
+
+    uint32_t bytes_to_flush = FLUSH_GRANULARITY;
+    if (position_in_buffer < bytes_to_flush)
+        bytes_to_flush = position_in_buffer;
+
+    crc = crc32c(crc, buffer, bytes_to_flush);
+    fwrite(buffer, 1, bytes_to_flush, fd);
+
+    position_in_file += bytes_to_flush;
+    position_in_buffer -= bytes_to_flush;
+    // cpy overhang
+    memmove(buffer, buffer + bytes_to_flush, position_in_buffer);
+
+    return bytes_to_flush;
+}
+
+Serializer::Serializer(const char* filename, serialize_mode_t mode) :
+    m_filename(filename), m_mode(mode), crc(~0)  {
+    fd = fopen(filename, m_mode == serialize_mode_t::Writing ? "wb" : "rb");
+
+    if (!fd)
+    {
+        perror("Serializer()");
+    }
+    else
+    {
+        if (mode == serialize_mode_t::Writing)
+        {
+            fwrite("OSMb", 4, 1, fd); // write magic number
+            uint32_t versionNumber = 1;
+            if (ferror(fd))
+            {
+                perror("Serializer()");
+                assert(0);
+            }
+            fwrite(&versionNumber, sizeof(versionNumber), 1, fd); // write version number
+            // placeholder for ~crc;
+            uint32_t invCrc = ~crc;
+            // NOTE: crc is not valid yet we just write it as a place_holder
+            fwrite(&crc, sizeof(crc), 1, fd);
+            fwrite(&invCrc, sizeof(invCrc), 1, fd);
+            assert(ftell(fd) == 16);
+        }
+        else
+        {
+            fseek(fd, 0, SEEK_END);
+            bytes_in_file = ftell(fd);
+            fseek(fd, 0, SEEK_SET);
+
+            int bytes_read = 0;
+
+            char magic[4];
+            bytes_read += fread(&magic, 1, sizeof(magic), fd);
+
+            uint32_t versionNumber;
+            bytes_read += fread(&versionNumber, 1, sizeof(versionNumber), fd);
+
+            uint32_t r_crc;
+            bytes_read += fread(&r_crc, 1, sizeof(r_crc), fd);
+
+            bytes_read += fread(&r_invCrc, 1, sizeof(r_invCrc), fd);
+            if(r_crc != ~r_invCrc)
+            {
+                printf("read crc %x and invCrc %x \n", r_crc, r_invCrc);
+                fprintf(stderr, "initial CRC check failed ... file '%s' is corrupted\n", m_filename);
+                abort();
+            }
+
+            position_in_file = bytes_read;
+            assert(ftell(fd) == 16 && position_in_file == 16);
+            assert(0 == memcmp(&magic, "OSMb", 4));
+        }
+    }
+}
