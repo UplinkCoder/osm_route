@@ -257,8 +257,6 @@ struct StringTable
             assert((uint32_t)(ptr - begin) == string_data.size());
         }
         // serializer.EndField();
-         serializer.WriteFlush();
-         printf("position of the u32 for the number of strings: %ld\n", ftell(serializer.fd));
 
         // we only need to store the number of strings as we can
         // reproduce the string entires by reading in the null

@@ -26,136 +26,29 @@ struct Serializer
 
 private:
     void ReadFlush(void);
+     uint32_t WriteFlush(void);
+
 public:
     uint32_t ReadShortUint(void);
-    uint32_t WriteFlush(void);
-
 
     Serializer(const char* filename, serialize_mode_t mode);
-        
-    ~Serializer()
-    {
-        // TODO maybe pad the file to a multiple of 4?
-        if (m_mode == serialize_mode_t::Writing)
-        {
-            WriteFlush();
-            fseek(fd, 8, SEEK_SET);
-            fwrite(&crc, 1, sizeof(crc), fd);
-            printf("writing crc: %x\n", crc);
-            uint32_t invCrc = ~crc;
-            fwrite(&invCrc, 1, sizeof(invCrc), fd);
-            printf("writing invCrc: %x\n", invCrc);
-        }
-        if (m_mode == serialize_mode_t::Reading)
-        {
-            assert(position_in_file == bytes_in_file);
-            assert(~crc == r_invCrc);
-        }
-        fclose(fd);
-    }
+    ~Serializer();
 
     // Returns number of bytes written. 0 means error.
-    uint8_t WriteShortUint(uint32_t value) {
-        assert(m_mode == serialize_mode_t::Writing);
-
-        if(value >= 0x40000000)
-            return 0;
-
-        if (position_in_buffer >= FLUSH_GRANULARITY)
-        {
-            // try to flush in 4092 chunks
-            WriteFlush();
-        }
-        if (value < 0x80)
-        {
-            buffer[position_in_buffer++] = (uint8_t)value;
-            return 1;
-        }
-        else if (value < (1 << 14))
-        {
-            buffer[position_in_buffer++] = (uint8_t)(value | 0x80);
-            buffer[position_in_buffer++] = (uint8_t)(value >>  7);
-            return 2;
-        }
-        else
-        {
-            buffer[position_in_buffer++] = (uint8_t)((value >> 0) | 0x80);
-            buffer[position_in_buffer++] = (uint8_t)((value >> 7) | 0x80);
-            buffer[position_in_buffer++] = (uint8_t)(value >> 14);
-            buffer[position_in_buffer++] = (uint8_t)(value >> 22);
-            return 4;
-        }
-    }
+    uint8_t WriteShortUint(uint32_t value);
 
     /// May not write all the data in one go
     /// use in a loop or via the WRITE_ARRAY_DATA_SIZE macro
     /// Returns the number of bytes written
-    uint32_t WriteRawData(const void* data, uint32_t size) {
-        assert(m_mode == serialize_mode_t::Writing);
-
-        if (position_in_buffer > FLUSH_GRANULARITY)
-            WriteFlush();
-
-        if (size > FLUSH_GRANULARITY)
-            size = FLUSH_GRANULARITY;
-
-        memcpy(buffer + position_in_buffer, data, size);
-        position_in_buffer += size;
-        assert(position_in_buffer < BUFFER_SIZE);
-
-        return size;
-    }
+    uint32_t WriteRawData(const void* data, uint32_t size);
 
     /// May not read all the data in one go;
     /// use in a loop or via the READ_ARRAY_DATA_SIZE macro
     /// Returns the number of bytes read
-    uint32_t ReadRawData(void* data, uint32_t size) {
-        assert(m_mode == serialize_mode_t::Reading);
+    uint32_t ReadRawData(void* data, uint32_t size);
 
-        if ((buffer_used - position_in_buffer) < FLUSH_GRANULARITY)
-            ReadFlush();
-
-        uint32_t bytes_avialable = (buffer_used - position_in_buffer);
-
-        if (size > FLUSH_GRANULARITY)
-            size = FLUSH_GRANULARITY;
-
-        if (size > bytes_avialable)
-            size = bytes_avialable;
-
-        // printf("position in buffer");
-        memcpy(data, buffer + position_in_buffer, size);
-        position_in_buffer += size;
-
-        assert(position_in_buffer < BUFFER_SIZE);
-
-        return size;
-    }
-
-    uint32_t ReadU32(void) {
-        assert(m_mode == serialize_mode_t::Reading);
-
-        if (buffer_used - position_in_buffer < 4)
-        {
-            ReadFlush();
-        }
-        assert(buffer_used - position_in_buffer >= 4);
-        uint32_t result =  (*(uint32_t*)(buffer + position_in_buffer));
-        position_in_buffer += 4;
-        return result;
-    }
-
-    void WriteU32(uint32_t value) {
-        assert(m_mode == serialize_mode_t::Writing);
-
-       if (position_in_buffer >= FLUSH_GRANULARITY)
-       {
-           WriteFlush();
-       }
-
-        (*(uint32_t*)(buffer + position_in_buffer)) = value;
-        position_in_buffer += 4;
-    }
+    uint32_t ReadU32(void);
+    void WriteU32(uint32_t value);
 } ;
 
 #define WRITE_ARRAY_DATA(WRITER, ARRAY) \
@@ -191,7 +84,6 @@ public:
         } while (bytes_read); \
         assert(bytes_left == 0); \
     }
-
 
 void Serializer::ReadFlush(void)
 {
@@ -330,4 +222,120 @@ Serializer::Serializer(const char* filename, serialize_mode_t mode) :
             assert(0 == memcmp(&magic, "OSMb", 4));
         }
     }
+}
+
+Serializer::~Serializer() {
+    // TODO maybe pad the file to a multiple of 4?
+    if (m_mode == serialize_mode_t::Writing)
+    {
+        WriteFlush();
+        fseek(fd, 8, SEEK_SET);
+        fwrite(&crc, 1, sizeof(crc), fd);
+        printf("writing crc: %x\n", crc);
+        uint32_t invCrc = ~crc;
+        fwrite(&invCrc, 1, sizeof(invCrc), fd);
+        printf("writing invCrc: %x\n", invCrc);
+    }
+    if (m_mode == serialize_mode_t::Reading)
+    {
+        assert(position_in_file == bytes_in_file);
+        assert(~crc == r_invCrc);
+    }
+    fclose(fd);
+}
+
+uint8_t Serializer::WriteShortUint(uint32_t value) {
+    assert(m_mode == serialize_mode_t::Writing);
+
+    if(value >= 0x40000000)
+        return 0;
+
+    if (position_in_buffer >= FLUSH_GRANULARITY)
+    {
+        // try to flush in 4092 chunks
+        WriteFlush();
+    }
+    if (value < 0x80)
+    {
+        buffer[position_in_buffer++] = (uint8_t)value;
+        return 1;
+    }
+    else if (value < (1 << 14))
+    {
+        buffer[position_in_buffer++] = (uint8_t)(value | 0x80);
+        buffer[position_in_buffer++] = (uint8_t)(value >>  7);
+        return 2;
+    }
+    else
+    {
+        buffer[position_in_buffer++] = (uint8_t)((value >> 0) | 0x80);
+        buffer[position_in_buffer++] = (uint8_t)((value >> 7) | 0x80);
+        buffer[position_in_buffer++] = (uint8_t)(value >> 14);
+        buffer[position_in_buffer++] = (uint8_t)(value >> 22);
+        return 4;
+    }
+}
+
+uint32_t Serializer::WriteRawData(const void* data, uint32_t size) {
+    assert(m_mode == serialize_mode_t::Writing);
+
+    if (position_in_buffer > FLUSH_GRANULARITY)
+        WriteFlush();
+
+    if (size > FLUSH_GRANULARITY)
+        size = FLUSH_GRANULARITY;
+
+    memcpy(buffer + position_in_buffer, data, size);
+    position_in_buffer += size;
+    assert(position_in_buffer < BUFFER_SIZE);
+
+    return size;
+}
+
+uint32_t Serializer::ReadRawData(void* data, uint32_t size) {
+    assert(m_mode == serialize_mode_t::Reading);
+
+    if ((buffer_used - position_in_buffer) < FLUSH_GRANULARITY)
+        ReadFlush();
+
+    uint32_t bytes_avialable = (buffer_used - position_in_buffer);
+
+    if (size > FLUSH_GRANULARITY)
+        size = FLUSH_GRANULARITY;
+
+    if (size > bytes_avialable)
+        size = bytes_avialable;
+
+    // printf("position in buffer");
+    memcpy(data, buffer + position_in_buffer, size);
+    position_in_buffer += size;
+
+    assert(position_in_buffer < BUFFER_SIZE);
+
+    return size;
+}
+
+uint32_t Serializer::ReadU32(void) {
+    assert(m_mode == serialize_mode_t::Reading);
+
+    if (buffer_used - position_in_buffer < 4)
+    {
+        ReadFlush();
+    }
+    assert(buffer_used - position_in_buffer >= 4);
+    uint32_t result =  (*(uint32_t*)(buffer + position_in_buffer));
+    position_in_buffer += 4;
+    return result;
+}
+
+void Serializer::WriteU32(uint32_t value) {
+    assert(m_mode == serialize_mode_t::Writing);
+
+   if (position_in_buffer >= FLUSH_GRANULARITY)
+   {
+       WriteFlush();
+   }
+
+    (*(uint32_t*)(buffer + position_in_buffer)) = value;
+    position_in_buffer += 4;
 }
