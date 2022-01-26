@@ -56,11 +56,14 @@ struct Serializer
     static const int BUFFER_SIZE       = (FLUSH_GRANULARITY * 2);
 
     uint8_t buffer[BUFFER_SIZE];
+
+    Serializer() = default;
 private:
     void RefillBuffer(void)
     {
-        uint64_t bytes_avilable = bytes_in_file - position_in_file;
-        assert(buffer_used >= position_in_buffer);
+        assert(buffer_used >= position_in_buffer); // general invariant
+      
+        const uint64_t bytes_avilable = bytes_in_file - position_in_file;
         const auto old_bytes_in_buffer = buffer_used - position_in_buffer;
 
         // assert(bytes_avilable > 0);
@@ -113,7 +116,8 @@ public:
 
         crc = crc32c(crc, buffer, bytes_to_flush);
         fwrite(buffer, 1, bytes_to_flush, fd);
-
+       
+        position_in_file += bytes_to_flush;
         position_in_buffer -= bytes_to_flush;
         // cpy overhang
         memmove(buffer, buffer + bytes_to_flush, position_in_buffer);
@@ -235,16 +239,22 @@ public:
     /// May not read all the Data
     /// Returns the number of bytes read
     uint32_t ReadRawData(void* data, uint32_t size)
-    {
+    {   
         if ((buffer_used - position_in_buffer) < FLUSH_GRANULARITY)
             RefillBuffer();
+           
+        uint32_t bytes_avialable = (buffer_used - position_in_buffer);
 
         if (size > FLUSH_GRANULARITY)
             size = FLUSH_GRANULARITY;
+       
+        if (size > bytes_avialable)
+            size = bytes_avialable;
 
+        // printf("position in buffer");
         memcpy(data, buffer + position_in_buffer, size);
-        buffer_used -= size;
-        
+        position_in_buffer += size;
+       
         assert(position_in_buffer < BUFFER_SIZE);
 
         return size;
@@ -485,7 +495,9 @@ struct StringTable
             assert((uint32_t)(ptr - begin) == string_data.size());
         }
         // serializer.EndField();
-        
+         serializer.WriteFlush();
+         printf("position of the u32 for the number of strings: %ld\n", ftell(serializer.fd));
+
         // we only need to store the number of strings as those are known
         serializer.WriteU32(strings.size());
  /*
@@ -530,31 +542,36 @@ struct StringTable
         }
         // serializer.EndField();
         {
+            const char * const string_data_begin = string_data.data();
             const char* string_ptr = string_data.data();
-            
+           
             auto n_strings = serializer.ReadU32();
             strings.resize(n_strings);
-            uint32_t offset = 0;
-            
+           
+           
             for(StringEntry& e : strings)
             {
-                e.offset = offset;
-                
-                uint32_t length = 0;
-                while(*string_ptr++) {length++;}
-                
+                const char* const word_begin = string_ptr;
+                e.offset = (uint32_t)(word_begin - string_data_begin);
+               
+                uint32_t length = strlen(word_begin);
+                assert(length);
+               
                 e.length = length;
                 e.crc32 = FINALIZE_CRC32C(
-                    crc32c(inital_crc32c, string_ptr - length, length)
+                    crc32c(inital_crc32c, string_ptr, length)
                 );
+                string_ptr += length;
+                assert(*string_ptr == '\0');
                 string_ptr++;
-                offset += length + 1;
             }
-            
-            assert(offset == string_data.size());
+            // back out the last string_ptr increment.
+            --string_ptr;
+           
+            assert((string_data_begin - string_ptr) == string_data.size());
         // let's recreate the strings vector
         }
-        
+       
         {
             // now recreate the map
             // crc32_to_indecies
@@ -563,6 +580,72 @@ struct StringTable
             {
                 crc32_to_indecies.emplace(e.crc32, idx++);
             }
+        }
+    }
+   
+    void DeSerialize_Test (Serializer& serializer, const StringTable& test) {
+        // serialize string data.
+        // serializer.BeginField("vector<char>", "string_data");
+        {
+            uint32_t n_chars = serializer.ReadU32();
+            string_data.resize(n_chars);
+
+            const auto begin = (const char*)string_data.data();
+            auto ptr = string_data.data();
+            uint32_t bytes_read = 0;
+            uint32_t size_left = n_chars;
+            do {
+                bytes_read = serializer.ReadRawData(ptr, size_left);
+                ptr += bytes_read;
+                size_left -= bytes_read;
+            } while(bytes_read);
+            assert(!size_left);
+            assert((uint32_t)(ptr - begin) == string_data.size());
+        }
+        assert(string_data.size() == test.string_data.size());
+        int pos_diff = 0;
+        for (int p = 0;
+            p < string_data.size();
+            p++)
+        {
+            if (string_data[p] != test.string_data[p])
+            {
+                pos_diff = p;
+                break;
+            }
+        }
+        assert(string_data == test.string_data);
+       
+        // serializer.EndField();
+        {
+            const char * const string_data_begin = string_data.data();
+            const char* string_ptr = string_data.data();
+           
+            auto n_strings = serializer.ReadU32();
+            strings.resize(n_strings);
+           
+           
+            for(StringEntry& e : strings)
+            {
+                const char* const word_begin = string_ptr;
+                e.offset = (uint32_t)(word_begin - string_data_begin);
+               
+                uint32_t length = strlen(word_begin);
+                assert(length);
+               
+                e.length = length;
+                e.crc32 = FINALIZE_CRC32C(
+                    crc32c(inital_crc32c, string_ptr, length)
+                );
+                string_ptr += length;
+                assert(*string_ptr == '\0');
+                string_ptr++;
+            }
+            // back out the last string_ptr increment.
+            --string_ptr;
+           
+            assert((string_data_begin - string_ptr) == string_data.size());
+        // let's recreate the strings vector
         }
     }
 };
@@ -809,6 +892,10 @@ int main(int argc, char** argv) {
         }
     }
 
+    Serializer*  p;
+    Serializer tmp;;
+    p = &tmp;
+
     {
         Serializer s {"test.dat", Serializer::serialize_mode_t::Writing};
 
@@ -816,16 +903,18 @@ int main(int argc, char** argv) {
         // u32 -- string data length for tag names
         serializeWays.tag_names.Serialize(s);
         serializeWays.tag_values.Serialize(s);
+        *p = s;
+
     }
     {
         Serializer d {"test.dat", Serializer::serialize_mode_t::Reading};
 
         StringTable d_tag_names {};
         StringTable d_tag_values {};
-        
-        d_tag_names.DeSerialize(d);
+       
+        d_tag_names.DeSerialize_Test(d, serializeWays.tag_names);
         d_tag_values.DeSerialize(d);
-        
+       
         printf("deserilzed tag-keys: %d\n", (int)d_tag_names.strings.size());
         printf("deserilzed tag-values: %d\n", (int)d_tag_values.strings.size());
 
@@ -833,15 +922,56 @@ int main(int argc, char** argv) {
     return 0;
 }
 
+#define WRITE_ARRAY_DATA(WRITER, ARRAY) \
+    { \
+        char* p = (char*)(ARRAY); \
+        int bytes_left = sizeof((ARRAY)); \
+        int bytes_written = 0; \
+        do \
+        { \
+            bytes_written = (WRITER).WriteRawData(p, bytes_left); \
+            p += bytes_written; \
+            bytes_left -= bytes_written; \
+        } while (bytes_written); \
+        assert(bytes_left == 0); \
+    }
+
+#define READ_ARRAY_DATA(READER, ARRAY) \
+    { \
+        char* p = (char*)(ARRAY); \
+        int bytes_left = sizeof(ARRAY); \
+        int bytes_read = 0; \
+        do \
+        { \
+            bytes_read = (READER).ReadRawData(p, bytes_left); \
+            p += bytes_read; \
+            bytes_left -= bytes_read; \
+        } while (bytes_read); \
+        assert(bytes_left == 0); \
+    }
+
+
 void test_serializer(void)
 {
     using serialize_mode_t = Serializer::serialize_mode_t;
 
     {
         Serializer writer { "test_s.dat", serialize_mode_t::Writing };
+       
         writer.WriteU32(19);
         writer.WriteShortInt(29);
-        writer.WriteShortInt(3000);
+        writer.WriteShortInt(127);
+        int x[2048];
+        for(int i = 0;
+            i < 2048;
+            i++
+        )
+        {
+            x[i] = i + 1;
+        }
+
+        WRITE_ARRAY_DATA(writer, x);
+        writer.WriteU32(1993 << 16);
     }
     {
         Serializer reader { "test_s.dat", serialize_mode_t::Reading };
@@ -849,7 +979,18 @@ void test_serializer(void)
         assert(reader.ReadU32() == 19);
         assert(reader.ReadShortInt() == 29);
         int result = reader.ReadShortInt();
-        assert(result == 3000);
+        assert(result == 127);
+        int x[2048];
+        READ_ARRAY_DATA(reader, x);
+        result = reader.ReadU32();
+        assert(result == 1993 << 16);
+        for(int i = 0;
+            i < 2048;
+            i++
+        )
+        {
+            assert(x[i] == i + 1);
+        }
     }
 }
 /*
