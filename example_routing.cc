@@ -19,7 +19,8 @@ To run it:
 #include "crc32.c"
 
 #if (__cplusplus <= 201500)
-#  include <experimental/string_view>
+#  include "string_view.hpp"
+   using string_view = bpstd::string_view;
 #else
 #  include <string_view>
 #endif
@@ -145,7 +146,7 @@ struct StringTable
     ~StringTable() = default;
 
     StringTable(vector<const char*> primer = {}) : string_data(), strings(), crc32_to_indecies() {
-        for(auto e : primer)
+        for(auto &e : primer)
         {
             AddString(string_view {e, strlen(e)} );
         }
@@ -332,6 +333,9 @@ struct SerializeWays
 {
     std::unordered_map<uint64_t, Node> nodes;
 
+	uint64_t max_node_id = 0;
+	uint64_t min_node_id = ~0UL;
+
     set<uint32_t> street_names_indicies {};
     StringTable tag_names {
 //#        include "prime_names.h"
@@ -356,6 +360,11 @@ struct SerializeWays
 
 
     void node_callback(uint64_t osmid, double lon, double lat, const Tags &tags) {
+		if (osmid > max_node_id)
+			this->max_node_id = osmid;
+		if (osmid < min_node_id)
+			this->min_node_id = osmid;
+		printf("osmid: %lu\n", osmid);
         this->nodes[osmid] = Node(osmid, lon, lat, ShortenTags(tags));
     }
 
@@ -379,7 +388,6 @@ struct SerializeWays
 
     // We don't care about relations
     void relation_callback(uint64_t /*osmid*/, const Tags &/*tags*/, const References & /*refs*/){}
-
 };
 
 struct Routing {
@@ -486,6 +494,7 @@ int main(int argc, char** argv) {
     printf("max number of tags: %d\n", maxTags);
     printf("max number of tag-keys: %d\n", (int)serializeWays.tag_names.strings.size());
     printf("max number of tag-values: %d\n", (int)serializeWays.tag_values.strings.size());
+    printf("max id: %lu ... min id: %lu\n", serializeWays.max_node_id, serializeWays.min_node_id);
 
     serializeWays.tag_values.SortUsageCounts();
     serializeWays.tag_names.SortUsageCounts();
@@ -586,7 +595,6 @@ int main(int argc, char** argv) {
 
         printf("deserilzed tag-keys: %d\n", (int)d_tag_names.strings.size());
         printf("deserilzed tag-values: %d\n", (int)d_tag_values.strings.size());
-
     }
     return 0;
 }
@@ -600,7 +608,7 @@ void test_serializer(void)
 
         writer.WriteU32(19);
         writer.WriteShortUint(29);
-        writer.WriteShortUint(127);
+        writer.WriteShortUint(227);
         uint8_t x[Serializer::BUFFER_SIZE * 2];
         for(int i = 0;
             i < Serializer::BUFFER_SIZE * 2;
@@ -611,7 +619,7 @@ void test_serializer(void)
         }
 
         WRITE_ARRAY_DATA(writer, x);
-        writer.WriteU32(1993 << 16);
+        writer.WriteU32(1993 << 13);
     }
     {
         Serializer reader { "test_s.dat", serialize_mode_t::Reading };
@@ -619,7 +627,7 @@ void test_serializer(void)
         assert(reader.ReadU32() == 19);
         assert(reader.ReadShortUint() == 29);
         int result = reader.ReadShortUint();
-        assert(result == 127);
+        assert(result == 227);
         uint8_t x[Serializer::BUFFER_SIZE * 2];
         
         READ_ARRAY_DATA(reader, x);
@@ -631,7 +639,7 @@ void test_serializer(void)
         {
             assert(x[i] == (uint8_t)(i + 1));
         }
-        assert(result == 1993 << 16);
+        assert(result == 1993 << 13);
     }
 }
 /*
