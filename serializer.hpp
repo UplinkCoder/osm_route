@@ -1,3 +1,5 @@
+#include <stdio.h>
+
 struct Serializer
 {
     enum class serialize_mode_t { Reading, Writing };
@@ -18,11 +20,11 @@ struct Serializer
     static const int BUFFER_SIZE       = (FLUSH_GRANULARITY * 2);
 
     uint8_t buffer[BUFFER_SIZE];
-    
+
     uint32_t r_invCrc; // reader only
 
 private:
-    void RefillBuffer(void)
+    void ReadFlush(void)
     {
         assert(buffer_used >= position_in_buffer); // general invariant
 
@@ -38,19 +40,22 @@ private:
         memmove(buffer, buffer + position_in_buffer, old_bytes_in_buffer);
         auto bytes_read = fread(buffer + old_bytes_in_buffer, 1, size_to_read, fd);
         assert(bytes_read == size_to_read);
+
+        crc = crc32c(crc, buffer + old_bytes_in_buffer, size_to_read);
+
         buffer_used = old_bytes_in_buffer + bytes_read;
         position_in_buffer = 0;
 
         position_in_file += size_to_read;
     }
 public:
-    uint32_t ReadShortInt(void) {
+    uint32_t ReadShortUint(void) {
         assert(position_in_buffer < buffer_used);
 
         if ((buffer_used - position_in_buffer) < 4
             && bytes_in_file - position_in_file > 0)
         {
-            RefillBuffer();
+            ReadFlush();
         }
 
         assert(buffer_used > 1);
@@ -59,13 +64,22 @@ public:
         const auto first_byte = *mem++;
         position_in_buffer++;
 
-        uint32_t result = first_byte & 0x7f;
-        const auto is_long = (first_byte & 0x80) != 0;
-        if (is_long)
+        uint32_t result = (first_byte & 0x7f);
+        const auto has_next = (first_byte & 0x80) != 0;
+        if (has_next)
         {
-            // read next 3 bytes
-            result |= ((*(uint32_t*)mem) & 0xffffff) << 7;
-            position_in_buffer += 3;
+            const auto second_byte = *mem++;
+            position_in_buffer++;
+
+            result |= ((second_byte & 0x7f) << 7);
+            const auto has_next2 = (second_byte & 0x80) != 0;
+
+            // read next byte
+            if (has_next2)
+            {
+                result |= ((*(uint16_t*)mem) << 14);
+                position_in_buffer += 2;
+            }
         }
 
         return result;
@@ -74,7 +88,7 @@ public:
     uint32_t WriteFlush()
     {
         assert(m_mode == serialize_mode_t::Writing);
-        
+
         uint32_t bytes_to_flush = FLUSH_GRANULARITY;
         if (position_in_buffer < bytes_to_flush)
             bytes_to_flush = position_in_buffer;
@@ -92,7 +106,7 @@ public:
 
 
     Serializer(const char* filename, serialize_mode_t mode) :
-        m_filename(filename), m_mode(mode)  {
+        m_filename(filename), m_mode(mode), crc(~0)  {
         fd = fopen(filename, m_mode == serialize_mode_t::Writing ? "wb" : "rb");
 
         if (!fd)
@@ -112,7 +126,6 @@ public:
                 }
                 fwrite(&versionNumber, sizeof(versionNumber), 1, fd); // write version number
                 // placeholder for ~crc;
-                crc = ~0;
                 uint32_t invCrc = ~crc;
                 // NOTE: crc is not valid yet we just write it as a place_holder
                 fwrite(&crc, sizeof(crc), 1, fd);
@@ -125,23 +138,28 @@ public:
                 bytes_in_file = ftell(fd);
                 fseek(fd, 0, SEEK_SET);
 
-                char magic[4];
-                uint32_t versionNumber;
                 int bytes_read = 0;
+
+                char magic[4];
+                bytes_read += fread(&magic, 1, sizeof(magic), fd);
+
+                uint32_t versionNumber;
+                bytes_read += fread(&versionNumber, 1, sizeof(versionNumber), fd);
+
                 uint32_t r_crc;
                 bytes_read += fread(&r_crc, 1, sizeof(r_crc), fd);
-                uint32_t invCrc = ~r_crc;
-                bytes_read += fread(&magic, 1, sizeof(magic), fd);
-                bytes_read += fread(&versionNumber, 1, sizeof(versionNumber), fd);
-                bytes_read += fread(&invCrc, 1, sizeof(invCrc), fd);
+
+                bytes_read += fread(&r_invCrc, 1, sizeof(r_invCrc), fd);
+                if(r_crc != ~r_invCrc)
+                {
+                    printf("read crc %x and invCrc %x \n", r_crc, r_invCrc);
+                    fprintf(stderr, "initial CRC check failed ... file '%s' is corrupted\n", m_filename);
+                    abort();
+                }
 
                 position_in_file = bytes_read;
                 assert(ftell(fd) == 16 && position_in_file == 16);
                 assert(0 == memcmp(&magic, "OSMb", 4));
-                assert(r_crc == ~invCrc);
-                
-                r_invCrc = invCrc;
-                crc = ~0;
             }
         }
     }
@@ -154,8 +172,10 @@ public:
             WriteFlush();
             fseek(fd, 8, SEEK_SET);
             fwrite(&crc, 1, sizeof(crc), fd);
+            printf("writing crc: %x\n", crc);
             uint32_t invCrc = ~crc;
             fwrite(&invCrc, 1, sizeof(invCrc), fd);
+            printf("writing invCrc: %x\n", invCrc);
         }
         if (m_mode == serialize_mode_t::Reading)
         {
@@ -166,37 +186,44 @@ public:
     }
 
     // Returns number of bytes written. 0 means error.
-    uint8_t WriteShortInt(uint32_t value) {
+    uint8_t WriteShortUint(uint32_t value) {
         assert(m_mode == serialize_mode_t::Writing);
-        
-       if(value >= 0x80000000)
+
+        if(value >= 0x40000000)
             return 0;
 
-       if (position_in_buffer >= FLUSH_GRANULARITY)
-       {
-           // try to flush in 4092 chunks
-           WriteFlush();
-       }
-       if (value < 0x80)
-       {
-           buffer[position_in_buffer++] = (uint8_t)value;
-           return 1;
-       }
-       else
-       {
-           buffer[position_in_buffer++] = (uint8_t)(value | 0x80);
-           buffer[position_in_buffer++] = (uint8_t)(value >>  7);
-           buffer[position_in_buffer++] = (uint8_t)(value >> 15);
-           buffer[position_in_buffer++] = (uint8_t)(value >> 23);
-           return 4;
-       }
+        if (position_in_buffer >= FLUSH_GRANULARITY)
+        {
+            // try to flush in 4092 chunks
+            WriteFlush();
+        }
+        if (value < 0x80)
+        {
+            buffer[position_in_buffer++] = (uint8_t)value;
+            return 1;
+        }
+        else if (value < (1 << 14))
+        {
+            buffer[position_in_buffer++] = (uint8_t)(value | 0x80);
+            buffer[position_in_buffer++] = (uint8_t)(value >>  7);
+            return 2;
+        }
+        else
+        {
+            buffer[position_in_buffer++] = (uint8_t)((value >> 0) | 0x80);
+            buffer[position_in_buffer++] = (uint8_t)((value >> 7) | 0x80);
+            buffer[position_in_buffer++] = (uint8_t)(value >> 14);
+            buffer[position_in_buffer++] = (uint8_t)(value >> 22);
+            return 4;
+        }
     }
 
-    /// May not write all the Data
+    /// May not write all the data in one go
+    /// use in a loop or via the WRITE_ARRAY_DATA_SIZE macro
     /// Returns the number of bytes written
     uint32_t WriteRawData(const void* data, uint32_t size) {
         assert(m_mode == serialize_mode_t::Writing);
-        
+
         if (position_in_buffer > FLUSH_GRANULARITY)
             WriteFlush();
 
@@ -210,14 +237,14 @@ public:
         return size;
     }
 
-    /// May not read all the Data
+    /// May not read all the data in one go;
+    /// use in a loop or via the READ_ARRAY_DATA_SIZE macro
     /// Returns the number of bytes read
     uint32_t ReadRawData(void* data, uint32_t size) {
         assert(m_mode == serialize_mode_t::Reading);
-        
-        
+
         if ((buffer_used - position_in_buffer) < FLUSH_GRANULARITY)
-            RefillBuffer();
+            ReadFlush();
 
         uint32_t bytes_avialable = (buffer_used - position_in_buffer);
 
@@ -238,10 +265,10 @@ public:
 
     uint32_t ReadU32(void) {
         assert(m_mode == serialize_mode_t::Reading);
-        
+
         if (buffer_used - position_in_buffer < 4)
         {
-            RefillBuffer();
+            ReadFlush();
         }
         assert(buffer_used - position_in_buffer >= 4);
         uint32_t result =  (*(uint32_t*)(buffer + position_in_buffer));
@@ -251,7 +278,7 @@ public:
 
     void WriteU32(uint32_t value) {
         assert(m_mode == serialize_mode_t::Writing);
-        
+
        if (position_in_buffer >= FLUSH_GRANULARITY)
        {
            WriteFlush();
@@ -264,7 +291,7 @@ public:
 
 #define WRITE_ARRAY_DATA(WRITER, ARRAY) \
     WRITE_ARRAY_DATA_SIZE(WRITER, ARRAY, sizeof(ARRAY))
-    
+
 #define READ_ARRAY_DATA(READER, ARRAY) \
     READ_ARRAY_DATA_SIZE(READER, ARRAY, sizeof(ARRAY))
 

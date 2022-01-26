@@ -595,8 +595,8 @@ void test_serializer(void)
         Serializer writer { "test_s.dat", serialize_mode_t::Writing };
 
         writer.WriteU32(19);
-        writer.WriteShortInt(29);
-        writer.WriteShortInt(127);
+        writer.WriteShortUint(29);
+        writer.WriteShortUint(127);
         uint8_t x[Serializer::BUFFER_SIZE * 2];
         for(int i = 0;
             i < Serializer::BUFFER_SIZE * 2;
@@ -613,8 +613,8 @@ void test_serializer(void)
         Serializer reader { "test_s.dat", serialize_mode_t::Reading };
 
         assert(reader.ReadU32() == 19);
-        assert(reader.ReadShortInt() == 29);
-        int result = reader.ReadShortInt();
+        assert(reader.ReadShortUint() == 29);
+        int result = reader.ReadShortUint();
         assert(result == 127);
         uint8_t x[Serializer::BUFFER_SIZE * 2];
         
