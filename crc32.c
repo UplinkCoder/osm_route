@@ -29,7 +29,7 @@ EXTERN_C uint32_t crc32c(uint32_t crc, const void* s, const uint32_t len_p);
 #pragma once
 
 #ifndef NO_CRC32C_TABLE
-inline static const uint32_t crc32Table[256] = {
+static const uint32_t crc32Table[256] = {
     0x00000000L, 0xF26B8303L, 0xE13B70F7L, 0x1350F3F4L,
     0xC79A971FL, 0x35F1141CL, 0x26A1E7E8L, 0xD4CA64EBL,
     0x8AD958CFL, 0x78B2DBCCL, 0x6BE22838L, 0x9989AB3BL,
