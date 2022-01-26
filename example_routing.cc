@@ -36,251 +36,7 @@ struct Offsets
 
 } ;
 
-struct Serializer
-{
-    enum class serialize_mode_t { Reading, Writing };
-
-    FILE* fd;
-    const char* m_filename;
-    serialize_mode_t m_mode;
-
-    uint32_t crc;
-
-    uint64_t bytes_in_file      = 0;
-    uint64_t position_in_file   = 0;
-
-    uint32_t position_in_buffer = 0;
-    uint32_t buffer_used        = 0;
-
-    static const int FLUSH_GRANULARITY = 4096;
-    static const int BUFFER_SIZE       = (FLUSH_GRANULARITY * 2);
-
-    uint8_t buffer[BUFFER_SIZE];
-
-    Serializer() = default;
-private:
-    void RefillBuffer(void)
-    {
-        assert(buffer_used >= position_in_buffer); // general invariant
-      
-        const uint64_t bytes_avilable = bytes_in_file - position_in_file;
-        const auto old_bytes_in_buffer = buffer_used - position_in_buffer;
-
-        // assert(bytes_avilable > 0);
-
-        uint32_t size_to_read = BUFFER_SIZE - buffer_used;
-        if (bytes_avilable < size_to_read)
-            size_to_read = bytes_avilable;
-
-        memmove(buffer, buffer + position_in_buffer, old_bytes_in_buffer);
-        auto bytes_read = fread(buffer + old_bytes_in_buffer, 1, size_to_read, fd);
-        assert(bytes_read == size_to_read);
-        buffer_used = old_bytes_in_buffer + bytes_read;
-        position_in_buffer = 0;
-
-        position_in_file += size_to_read;
-    }
-public:
-    uint32_t ReadShortInt(void) {
-        assert(position_in_buffer < buffer_used);
-
-        if ((buffer_used - position_in_buffer) < 4
-            && bytes_in_file - position_in_file > 0)
-        {
-            RefillBuffer();
-        }
-
-        assert(buffer_used > 1);
-
-        auto mem = buffer + position_in_buffer;
-        const auto first_byte = *mem++;
-        position_in_buffer++;
-
-        uint32_t result = first_byte & 0x7f;
-        const auto is_long = (first_byte & 0x80) != 0;
-        if (is_long)
-        {
-            // read next 3 bytes
-            result |= ((*(uint32_t*)mem) & 0xffffff) << 7;
-            position_in_buffer += 3;
-        }
-
-        return result;
-    }
-
-    uint32_t WriteFlush()
-    {
-        uint32_t bytes_to_flush = FLUSH_GRANULARITY;
-        if (position_in_buffer < bytes_to_flush)
-            bytes_to_flush = position_in_buffer;
-
-        crc = crc32c(crc, buffer, bytes_to_flush);
-        fwrite(buffer, 1, bytes_to_flush, fd);
-       
-        position_in_file += bytes_to_flush;
-        position_in_buffer -= bytes_to_flush;
-        // cpy overhang
-        memmove(buffer, buffer + bytes_to_flush, position_in_buffer);
-
-        return bytes_to_flush;
-    }
-
-
-    Serializer(const char* filename, serialize_mode_t mode) :
-        m_filename(filename), m_mode(mode)  {
-        fd = fopen(filename, m_mode == serialize_mode_t::Writing ? "wb" : "rb");
-
-        if (!fd)
-        {
-            perror("Serializer()");
-        }
-        else
-        {
-            if (mode == serialize_mode_t::Writing)
-            {
-                fwrite("OSMb", 4, 1, fd); // write magic number
-                uint32_t versionNumber = 1;
-                if (ferror(fd))
-                {
-                    perror("Serializer()");
-                    assert(0);
-                }
-                fwrite(&versionNumber, sizeof(versionNumber), 1, fd); // write version number
-                // placeholder for ~crc;
-                uint32_t invCrc = ~crc;
-                // NOTE: crc is not valid yet we just write it as a place_holder
-                fwrite(&crc, sizeof(crc), 1, fd);
-                fwrite(&invCrc, sizeof(invCrc), 1, fd);
-                assert(ftell(fd) == 16);
-            }
-            else
-            {
-                fseek(fd, 0, SEEK_END);
-                bytes_in_file = ftell(fd);
-                fseek(fd, 0, SEEK_SET);
-
-                char magic[4];
-                uint32_t versionNumber;
-                int bytes_read = 0;
-                uint32_t invCrc = ~crc;
-                bytes_read += fread(&magic, 1, sizeof(magic), fd);
-                bytes_read += fread(&versionNumber, 1, sizeof(versionNumber), fd);
-                bytes_read += fread(&crc, 1, sizeof(crc), fd);
-                bytes_read += fread(&invCrc, 1, sizeof(invCrc), fd);
-
-                position_in_file = bytes_read;
-                assert(ftell(fd) == 16 && position_in_file == 16);
-                assert(0 == memcmp(&magic, "OSMb", 4));
-                assert(crc == ~invCrc);
-            }
-        }
-    }
-
-    ~Serializer()
-    {
-        // TODO maybe pad the file to a multiple of 4?
-        if (m_mode == serialize_mode_t::Writing)
-        {
-            WriteFlush();
-            fseek(fd, 8, SEEK_SET);
-            fwrite(&crc, 1, sizeof(crc), fd);
-            uint32_t invCrc = ~crc;
-            fwrite(&invCrc, 1, sizeof(invCrc), fd);
-        }
-        if (m_mode == serialize_mode_t::Reading)
-        {
-            assert(position_in_file == bytes_in_file);
-        }
-        fclose(fd);
-    }
-
-    // Returns number of bytes written. 0 means error.
-    uint8_t WriteShortInt(uint32_t value) {
-       if(value >= 0x80000000)
-            return 0;
-
-       if (position_in_buffer >= FLUSH_GRANULARITY)
-       {
-           // try to flush in 4092 chunks
-           WriteFlush();
-       }
-       if (value < 0x80)
-       {
-           buffer[position_in_buffer++] = (uint8_t)value;
-           return 1;
-       }
-       else
-       {
-           buffer[position_in_buffer++] = (uint8_t)(value | 0x80);
-           buffer[position_in_buffer++] = (uint8_t)(value >>  7);
-           buffer[position_in_buffer++] = (uint8_t)(value >> 15);
-           buffer[position_in_buffer++] = (uint8_t)(value >> 23);
-           return 4;
-       }
-    }
-
-    /// May not write all the Data
-    /// Returns the number of bytes written
-    uint32_t WriteRawData(const void* data, uint32_t size)
-    {
-        if (position_in_buffer > FLUSH_GRANULARITY)
-            WriteFlush();
-
-        if (size > FLUSH_GRANULARITY)
-            size = FLUSH_GRANULARITY;
-
-        memcpy(buffer + position_in_buffer, data, size);
-        position_in_buffer += size;
-        assert(position_in_buffer < BUFFER_SIZE);
-
-        return size;
-    }
-
-    /// May not read all the Data
-    /// Returns the number of bytes read
-    uint32_t ReadRawData(void* data, uint32_t size)
-    {   
-        if ((buffer_used - position_in_buffer) < FLUSH_GRANULARITY)
-            RefillBuffer();
-           
-        uint32_t bytes_avialable = (buffer_used - position_in_buffer);
-
-        if (size > FLUSH_GRANULARITY)
-            size = FLUSH_GRANULARITY;
-       
-        if (size > bytes_avialable)
-            size = bytes_avialable;
-
-        // printf("position in buffer");
-        memcpy(data, buffer + position_in_buffer, size);
-        position_in_buffer += size;
-       
-        assert(position_in_buffer < BUFFER_SIZE);
-
-        return size;
-    }
-
-    uint32_t ReadU32(void) {
-        if (buffer_used - position_in_buffer < 4)
-        {
-            RefillBuffer();
-        }
-        assert(buffer_used - position_in_buffer >= 4);
-        uint32_t result =  (*(uint32_t*)(buffer + position_in_buffer));
-        position_in_buffer += 4;
-        return result;
-    }
-
-    void WriteU32(uint32_t value) {
-       if (position_in_buffer >= FLUSH_GRANULARITY)
-       {
-           WriteFlush();
-       }
-
-        (*(uint32_t*)(buffer + position_in_buffer)) = value;
-        position_in_buffer += 4;
-    }
-} ;
+#include "serializer.hpp"
 
 
 template <typename map_t>
@@ -368,7 +124,7 @@ struct StringTable
         }
 
         if (!idx)
-        // counldn't find the string insert it
+        // couldn't find the string insert it
         {
             uint32_t offset = (uint32_t) string_data.size();
             StringEntry entry { crc, (uint32_t)str.size(), offset };
@@ -488,7 +244,7 @@ struct StringTable
             uint32_t bytes_written = 0;
 
             do {
-                bytes_written = serializer.WriteRawData(string_data.data(), size_left);
+                bytes_written = serializer.WriteRawData(ptr, size_left);
                 ptr += bytes_written;
                 size_left -= bytes_written;
             } while(bytes_written);
@@ -498,32 +254,15 @@ struct StringTable
          serializer.WriteFlush();
          printf("position of the u32 for the number of strings: %ld\n", ftell(serializer.fd));
 
-        // we only need to store the number of strings as those are known
+        // we only need to store the number of strings as we can
+        // reproduce the string entires by reading in the null
+        // terminated strings in order. 
         serializer.WriteU32(strings.size());
- /*
-        // serializer.BeginField("vector<StringEntry>", "strings");
-        {
-            serializer.WriteU32(strings.size());
-            const auto begin = (const char*)string_data.data();
-            auto ptr = (const char*)string_data.data();
-            uint32_t size_left = (string_data.size() * sizeof(StringEntry));
-            printf("Probably: %d bytes wasted\n", size_left - (5 * string_data.size()));
-            uint32_t bytes_written = 0;
-
-            do {
-                bytes_written = serializer.WriteRawData(string_data.data(), size_left);
-                ptr += bytes_written;
-                size_left -= bytes_written;
-            } while(bytes_written);
-            assert((uint32_t)(ptr - begin) == string_data.size()
-                * sizeof(StringEntry));
-        }
-        // serializer.EndField();
-*/
     }
 
     void DeSerialize (Serializer& serializer) {
         // serialize string data.
+
         // serializer.BeginField("vector<char>", "string_data");
         {
             uint32_t n_chars = serializer.ReadU32();
@@ -541,37 +280,35 @@ struct StringTable
             assert((uint32_t)(ptr - begin) == string_data.size());
         }
         // serializer.EndField();
+        
+        // let's recreate the strings vector
         {
+            auto n_strings = serializer.ReadU32();
+            
             const char * const string_data_begin = string_data.data();
             const char* string_ptr = string_data.data();
-           
-            auto n_strings = serializer.ReadU32();
+
             strings.resize(n_strings);
-           
-           
+
+
             for(StringEntry& e : strings)
             {
                 const char* const word_begin = string_ptr;
                 e.offset = (uint32_t)(word_begin - string_data_begin);
-               
+
                 uint32_t length = strlen(word_begin);
                 assert(length);
-               
+
                 e.length = length;
                 e.crc32 = FINALIZE_CRC32C(
                     crc32c(inital_crc32c, string_ptr, length)
                 );
                 string_ptr += length;
-                assert(*string_ptr == '\0');
                 string_ptr++;
             }
-            // back out the last string_ptr increment.
-            --string_ptr;
-           
-            assert((string_data_begin - string_ptr) == string_data.size());
-        // let's recreate the strings vector
+            assert((uint32_t)(string_ptr - string_data_begin) == string_data.size());
         }
-       
+
         {
             // now recreate the map
             // crc32_to_indecies
@@ -580,72 +317,6 @@ struct StringTable
             {
                 crc32_to_indecies.emplace(e.crc32, idx++);
             }
-        }
-    }
-   
-    void DeSerialize_Test (Serializer& serializer, const StringTable& test) {
-        // serialize string data.
-        // serializer.BeginField("vector<char>", "string_data");
-        {
-            uint32_t n_chars = serializer.ReadU32();
-            string_data.resize(n_chars);
-
-            const auto begin = (const char*)string_data.data();
-            auto ptr = string_data.data();
-            uint32_t bytes_read = 0;
-            uint32_t size_left = n_chars;
-            do {
-                bytes_read = serializer.ReadRawData(ptr, size_left);
-                ptr += bytes_read;
-                size_left -= bytes_read;
-            } while(bytes_read);
-            assert(!size_left);
-            assert((uint32_t)(ptr - begin) == string_data.size());
-        }
-        assert(string_data.size() == test.string_data.size());
-        int pos_diff = 0;
-        for (int p = 0;
-            p < string_data.size();
-            p++)
-        {
-            if (string_data[p] != test.string_data[p])
-            {
-                pos_diff = p;
-                break;
-            }
-        }
-        assert(string_data == test.string_data);
-       
-        // serializer.EndField();
-        {
-            const char * const string_data_begin = string_data.data();
-            const char* string_ptr = string_data.data();
-           
-            auto n_strings = serializer.ReadU32();
-            strings.resize(n_strings);
-           
-           
-            for(StringEntry& e : strings)
-            {
-                const char* const word_begin = string_ptr;
-                e.offset = (uint32_t)(word_begin - string_data_begin);
-               
-                uint32_t length = strlen(word_begin);
-                assert(length);
-               
-                e.length = length;
-                e.crc32 = FINALIZE_CRC32C(
-                    crc32c(inital_crc32c, string_ptr, length)
-                );
-                string_ptr += length;
-                assert(*string_ptr == '\0');
-                string_ptr++;
-            }
-            // back out the last string_ptr increment.
-            --string_ptr;
-           
-            assert((string_data_begin - string_ptr) == string_data.size());
-        // let's recreate the strings vector
         }
     }
 };
@@ -659,7 +330,7 @@ struct SerializeWays
 
     set<uint32_t> street_names_indicies {};
     StringTable tag_names {
-#        include "prime_names.h"
+//#        include "prime_names.h"
     };
     StringTable tag_values {};
     vector<Way> ways;
@@ -892,29 +563,23 @@ int main(int argc, char** argv) {
         }
     }
 
-    Serializer*  p;
-    Serializer tmp;;
-    p = &tmp;
-
     {
-        Serializer s {"test.dat", Serializer::serialize_mode_t::Writing};
+        Serializer s {"tags.dat", Serializer::serialize_mode_t::Writing};
 
         // u32 -- number of tags names
         // u32 -- string data length for tag names
         serializeWays.tag_names.Serialize(s);
         serializeWays.tag_values.Serialize(s);
-        *p = s;
-
     }
     {
-        Serializer d {"test.dat", Serializer::serialize_mode_t::Reading};
+        Serializer d {"tags.dat", Serializer::serialize_mode_t::Reading};
 
         StringTable d_tag_names {};
         StringTable d_tag_values {};
-       
-        d_tag_names.DeSerialize_Test(d, serializeWays.tag_names);
+
+        d_tag_names.DeSerialize(d);
         d_tag_values.DeSerialize(d);
-       
+
         printf("deserilzed tag-keys: %d\n", (int)d_tag_names.strings.size());
         printf("deserilzed tag-values: %d\n", (int)d_tag_values.strings.size());
 
@@ -922,52 +587,23 @@ int main(int argc, char** argv) {
     return 0;
 }
 
-#define WRITE_ARRAY_DATA(WRITER, ARRAY) \
-    { \
-        char* p = (char*)(ARRAY); \
-        int bytes_left = sizeof((ARRAY)); \
-        int bytes_written = 0; \
-        do \
-        { \
-            bytes_written = (WRITER).WriteRawData(p, bytes_left); \
-            p += bytes_written; \
-            bytes_left -= bytes_written; \
-        } while (bytes_written); \
-        assert(bytes_left == 0); \
-    }
-
-#define READ_ARRAY_DATA(READER, ARRAY) \
-    { \
-        char* p = (char*)(ARRAY); \
-        int bytes_left = sizeof(ARRAY); \
-        int bytes_read = 0; \
-        do \
-        { \
-            bytes_read = (READER).ReadRawData(p, bytes_left); \
-            p += bytes_read; \
-            bytes_left -= bytes_read; \
-        } while (bytes_read); \
-        assert(bytes_left == 0); \
-    }
-
-
 void test_serializer(void)
 {
     using serialize_mode_t = Serializer::serialize_mode_t;
 
     {
         Serializer writer { "test_s.dat", serialize_mode_t::Writing };
-       
+
         writer.WriteU32(19);
         writer.WriteShortInt(29);
         writer.WriteShortInt(127);
-        int x[2048];
+        uint8_t x[Serializer::BUFFER_SIZE * 2];
         for(int i = 0;
-            i < 2048;
+            i < Serializer::BUFFER_SIZE * 2;
             i++
         )
         {
-            x[i] = i + 1;
+            x[i] = (uint8_t)(i + 1);
         }
 
         WRITE_ARRAY_DATA(writer, x);
@@ -980,17 +616,18 @@ void test_serializer(void)
         assert(reader.ReadShortInt() == 29);
         int result = reader.ReadShortInt();
         assert(result == 127);
-        int x[2048];
+        uint8_t x[Serializer::BUFFER_SIZE * 2];
+        
         READ_ARRAY_DATA(reader, x);
         result = reader.ReadU32();
-        assert(result == 1993 << 16);
         for(int i = 0;
-            i < 2048;
+            i < Serializer::BUFFER_SIZE * 2;
             i++
         )
         {
-            assert(x[i] == i + 1);
+            assert(x[i] == (uint8_t)(i + 1));
         }
+        assert(result == 1993 << 16);
     }
 }
 /*
