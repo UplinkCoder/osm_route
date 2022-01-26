@@ -17,14 +17,18 @@ To run it:
 #include <stdlib.h>
 #include <assert.h>
 #include "crc32.c"
-#include "string_view.hpp"
+
+#if (__cplusplus <= 201500)
+#  include <experimental/string_view>
+#else
+#  include <string_view>
+#endif
 
 #define cast(T) (T)
 
 using namespace CanalTP;
 using namespace std;
 using short_tags_t = unordered_map<uint32_t, uint32_t>;
-using namespace bpstd;
 
 void test_serializer(void);
 
@@ -141,7 +145,7 @@ struct StringTable
     ~StringTable() = default;
 
     StringTable(vector<const char*> primer = {}) : string_data(), strings(), crc32_to_indecies() {
-        for(e : primer)
+        for(auto e : primer)
         {
             AddString(string_view {e, strlen(e)} );
         }

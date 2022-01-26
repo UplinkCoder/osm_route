@@ -35,6 +35,10 @@
 #ifndef BPSTD_STRING_VIEW_HPP
 #define BPSTD_STRING_VIEW_HPP
 
+#if (__cplusplus <= 201500)
+
+using string_view = bpstd::string_view;
+
 #include <algorithm>  // std::
 #include <string>     // std::char_traits
 #include <ostream>    // std::basic_ostream
@@ -1418,5 +1422,7 @@ namespace bpstd {
 } // namespace bpstd
 
 #endif /* BPSTD_DETAIL_STRING_VIEW_INL */
+
+#endif // version check
 
 #endif /* BPSTD_STRING_VIEW_HPP */
