@@ -492,13 +492,6 @@ struct SerializeWays
                 // id offset from base no
                 auto & child = nodes[base_id + child_list[i]];
 
-                uint64_t binary_delta_lon = ((*(uint64_t*) &base_node.lon_m) ^ (*(uint64_t*) &child.lon_m));
-                printf("binay_delta_lon %lx\n", binary_delta_lon);
-                uint64_t child_binary_lon = (*(uint64_t*) &base_node.lon_m) ^ binary_delta_lon;
-                assert(binary_delta_lon < (1UL << 54));
-                double n_child_lon = (*(double*) &child_binary_lon);
-                assert(n_child_lon == child.lon_m);
-
                 serializer.WriteF64(child.lat_m);
                 serializer.WriteF64(child.lon_m);
                 serializer.WriteShortUint(child.tags.size());
