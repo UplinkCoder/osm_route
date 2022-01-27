@@ -240,7 +240,7 @@ uint8_t Serializer::ReadShortUint(uint32_t* ptr) {
 
 Serializer::Serializer(const char* filename, serialize_mode_t mode) :
     m_filename(filename), m_mode(mode), crc(~0)  {
-    fd = fopen(filename, m_mode == serialize_mode_t::Writing ? "wb" : "rb");
+    fd = fopen(filename, m_mode == serialize_mode_t::Writing ? "r+b" : "rb");
 
     if (!fd)
     {
@@ -307,9 +307,6 @@ Serializer::~Serializer() {
 
         if (crc == invCrc)
         {
-            fflush(fd);
-            fclose(fd);
-
             crc = ~0;
             const auto file_size = position_in_file;
 
@@ -319,7 +316,6 @@ Serializer::~Serializer() {
                 if (ferror(fd))
                     perror("seeking");
 
-            fd = fopen(m_filename, "rb");
             position_in_file = 16;
             while(position_in_file < file_size)
             {
@@ -334,9 +330,6 @@ Serializer::~Serializer() {
                     break;
                 }
             }
-            fclose(fd);
-
-            fd = fopen(m_filename, "r+");
         }
 
         {
@@ -353,7 +346,10 @@ Serializer::~Serializer() {
         {
             //TODO recalc crc
         }
-        else assert(~crc == r_invCrc);
+        else
+        {
+            assert(~crc == r_invCrc);
+        }
     }
     fclose(fd);
 }
@@ -575,8 +571,16 @@ static void test_serializer(void) {
     }
 }
 
+#ifdef __cplusplus
+  extern "C" int puts(const char* s);
+#else
+  extern int puts(const char* s);
+#endif
+
 int main(int argc, char* argv[])
 {
     test_serializer();
+
+    puts("test succseeded");
 }
 #endif

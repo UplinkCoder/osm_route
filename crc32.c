@@ -1,6 +1,5 @@
 #include <stdint.h>
 
-
 // ARM feature check disabled as the intrinsic is slow than using the lookup table
 //
 //#ifdef __ARM_FEATURE_CRC32
