@@ -358,7 +358,7 @@ struct SerializeWays
     vector<pair<uint64_t, uint8_t> > baseNodes = {};
     vector<vector<uint8_t> > childNodes {};
 
-    set<uint32_t> street_names_indicies {};
+    set<uint32_t> street_name_indicies {};
 
     StringTable tag_names {
 #        include "prime_names.h"
@@ -422,7 +422,7 @@ struct SerializeWays
             if (name.size())
             {
                 name_index = tag_values.LookupString(name);
-                street_names_indicies.emplace(name_index);
+                street_name_indicies.emplace(name_index);
             }
         }
         ways.push_back({osmid, refs, ShortenTags(tags)});
@@ -439,7 +439,6 @@ struct SerializeWays
         serializer.WriteU32(0); // beginning tag values
         serializer.WriteU32(0); // beginning street_names
         serializer.WriteU32(0); // beginning nodes
-
 
         {
             // then we serialze the tags
@@ -462,6 +461,7 @@ struct SerializeWays
         // this will use base_nodes and delta coding
         printf("number of base_nodes %u\n", (uint32_t) baseNodes.size());
         printf("number of all nodes %u\n", (uint32_t) nodes.size());
+
         // serializer.BeginField("vector<pair<uint64, relativeNodes>>"
         clock_t serialize_bNodes_begin = clock();
         int idx = 0;
@@ -536,12 +536,29 @@ struct SerializeWays
             clock_t serialize_street_names_begin = clock();
             {
                 const auto street_name_position = serializer.CurrentPosition();
-
+                const auto oldP = serializer.SetPosition(index_p + 8);
+                serializer.WriteU32(street_name_position);
+                serializer.SetPosition(oldP);
+                serializer.WriteU32(street_name_indicies.size());
+                for(auto& e : street_name_indicies)
+                    serializer.WriteShortUint(e);
             }
             clock_t serialize_street_names_end = clock();
         printf("serialisation of street names took %f milliseconds\n",
             ((serialize_street_names_end - serialize_street_names_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
         }
+
+        clock_t serialize_ways_begin = clock();
+        {
+                const auto ways_start = serializer.CurrentPosition();
+                const auto oldP = serializer.SetPosition(index_p + 12);
+                serializer.WriteU32(ways_start);
+                serializer.SetPosition(oldP);
+        }
+        clock_t serialize_ways_end = clock();
+        printf("serialisation of street names took %f milliseconds\n",
+            ((serialize_ways_end - serialize_ways_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
+
     }
 };
 

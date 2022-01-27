@@ -240,7 +240,7 @@ uint8_t Serializer::ReadShortUint(uint32_t* ptr) {
 
 Serializer::Serializer(const char* filename, serialize_mode_t mode) :
     m_filename(filename), m_mode(mode), crc(~0)  {
-    fd = fopen(filename, m_mode == serialize_mode_t::Writing ? "r+b" : "rb");
+    fd = fopen(filename, m_mode == serialize_mode_t::Writing ? "r+w+b" : "rb");
 
     if (!fd)
     {
