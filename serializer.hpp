@@ -28,8 +28,8 @@ struct Serializer
     uint32_t r_invCrc; // reader only
 
 private:
-    void ReadFlush(void);
-     uint32_t WriteFlush(void);
+    uint32_t ReadFlush(void);
+    uint32_t WriteFlush(void);
 
 public:
     uint32_t ReadShortUint(void);
@@ -94,8 +94,7 @@ public:
         assert(bytes_left == 0); \
     }
 
-void Serializer::ReadFlush(void)
-{
+uint32_t Serializer::ReadFlush(void) {
     assert(buffer_used >= position_in_buffer); // general invariant
 
     const uint64_t bytes_available = bytes_in_file - position_in_file;
@@ -117,6 +116,26 @@ void Serializer::ReadFlush(void)
     position_in_buffer = 0;
 
     position_in_file += size_to_read;
+
+    return size_to_read;
+}
+
+uint32_t Serializer::WriteFlush (void) {
+    assert(m_mode == serialize_mode_t::Writing);
+
+    uint32_t bytes_to_flush = FLUSH_GRANULARITY;
+    if (position_in_buffer < bytes_to_flush)
+        bytes_to_flush = position_in_buffer;
+
+    crc = crc32c(crc, buffer, bytes_to_flush);
+    fwrite(buffer, 1, bytes_to_flush, fd);
+
+    position_in_file += bytes_to_flush;
+    position_in_buffer -= bytes_to_flush;
+    // cpy overhang
+    memmove(buffer, buffer + bytes_to_flush, position_in_buffer);
+
+    return bytes_to_flush;
 }
 
 uint32_t Serializer::ReadShortUint(void) {
@@ -153,24 +172,6 @@ uint32_t Serializer::ReadShortUint(void) {
     }
 
     return result;
-}
-
-uint32_t Serializer::WriteFlush (void) {
-    assert(m_mode == serialize_mode_t::Writing);
-
-    uint32_t bytes_to_flush = FLUSH_GRANULARITY;
-    if (position_in_buffer < bytes_to_flush)
-        bytes_to_flush = position_in_buffer;
-
-    crc = crc32c(crc, buffer, bytes_to_flush);
-    fwrite(buffer, 1, bytes_to_flush, fd);
-
-    position_in_file += bytes_to_flush;
-    position_in_buffer -= bytes_to_flush;
-    // cpy overhang
-    memmove(buffer, buffer + bytes_to_flush, position_in_buffer);
-
-    return bytes_to_flush;
 }
 
 Serializer::Serializer(const char* filename, serialize_mode_t mode) :
@@ -399,8 +400,7 @@ void Serializer::WriteF64(double value) {
 }
 
 
-
-void test_serializer(void) {
+static void test_serializer(void) {
     using serialize_mode_t = Serializer::serialize_mode_t;
 
     {

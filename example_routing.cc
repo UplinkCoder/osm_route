@@ -32,8 +32,6 @@ using namespace CanalTP;
 using namespace std;
 using short_tags_t = unordered_map<uint32_t, uint32_t>;
 
-void test_serializer(void);
-
 struct Offsets
 {
    const uint32_t NameTable = 0;
@@ -423,17 +421,20 @@ struct SerializeWays
     // We don't care about relations
     void relation_callback(uint64_t /*osmid*/, const Tags &/*tags*/, const References & /*refs*/){}
 
-    void Serialize(Serializer& serializer)
+    void Serialize (Serializer& serializer)
     {
+        {
         // First we serialze the tags
-        clock_t serialize_tags_begin = clock();
-        tag_names.Serialize(serializer);
-        tag_values.Serialize(serializer);
-        clock_t serialize_tags_end = clock();
+            clock_t serialize_tags_begin = clock();
+            {
+                tag_names.Serialize(serializer);
+                tag_values.Serialize(serializer);
+            }
+            clock_t serialize_tags_end = clock();
 
-        printf("serialisation of tags took %f milliseconds\n",
-            ((serialize_tags_end - serialize_tags_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
-
+            printf("serialisation of tags took %f milliseconds\n",
+                ((serialize_tags_end - serialize_tags_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
+        }
         // now we serialze the nodes.
         // this will use base_nodes and delta coding
         printf("number of base_nodes %u\n", (uint32_t) baseNodes.size());
@@ -441,10 +442,10 @@ struct SerializeWays
         // serializer.BeginField("vector<pair<uint64, relativeNodes>>"
         clock_t serialize_bNodes_begin = clock();
         int idx = 0;
-# if 1
+
         for(auto b : baseNodes)
         {
-/*			
+/*
             if (idx == 2)
             {
                 printf("base: ");
@@ -490,6 +491,14 @@ struct SerializeWays
                 serializer.WriteU8(child_list[i]);
                 // id offset from base no
                 auto & child = nodes[base_id + child_list[i]];
+
+                uint64_t binary_delta_lon = ((*(uint64_t*) &base_node.lon_m) ^ (*(uint64_t*) &child.lon_m));
+                printf("binay_delta_lon %lx\n", binary_delta_lon);
+                uint64_t child_binary_lon = (*(uint64_t*) &base_node.lon_m) ^ binary_delta_lon;
+                assert(binary_delta_lon < (1UL << 54));
+                double n_child_lon = (*(double*) &child_binary_lon);
+                assert(n_child_lon == child.lon_m);
+
                 serializer.WriteF64(child.lat_m);
                 serializer.WriteF64(child.lon_m);
                 serializer.WriteShortUint(child.tags.size());
@@ -502,24 +511,6 @@ struct SerializeWays
             }
             idx++;
         }
-#else
-    for(n : nodes)
-    {
-        Node& node = n.second;
-		serializer.WriteU32((uint32_t)(node.osmid >> 32));
-		// low bytes
-		serializer.WriteU32((uint32_t)node.osmid);
-		// writing out the number of relative nod
-		serializer.WriteF64(node.lat_m);
-		serializer.WriteF64(node.lon_m);
-		serializer.WriteShortUint(node.tags.size());
-		for(const auto & p : node.tags)
-		{
-			serializer.WriteShortUint(p.first);
-			serializer.WriteShortUint(p.second);
-		}
-	}
-#endif
         clock_t serialize_bNodes_end = clock();
         printf("serialisation of baseNodes took %f milliseconds\n",
             ((serialize_bNodes_end - serialize_bNodes_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
@@ -670,48 +661,6 @@ int main(int argc, char** argv) {
         #undef A
    }
 */
-/*
- *   amenity : fast_food
-  name : Asia-Imbiss
-  name:de : Asia-Imbiss
-  opening_hours : Mo-Fr 11:00-20:00; Sa 11:00-19:00
-  wheelchair : yes
-  */
-#define PV(NAME) \
-//    cout << #NAME << ": " << NAME << endl;
-
-    auto amenity_nt_id = serializeWays.tag_names["amenity"];
-    PV(amenity_nt_id);
-    auto name_nt_id = serializeWays.tag_names["name"];
-    PV(name_nt_id);
-    auto opening_hours_nt_id = serializeWays.tag_names["opening_hours"];
-    PV(opening_hours_nt_id);
-
-    auto asia_imbiss_vt_id = serializeWays.tag_values["Asia-Imbiss"];
-    PV(asia_imbiss_vt_id);
-    auto opening_times_vt_id = serializeWays.tag_values["Mo-Fr 11:00-20:00; Sa 11:00-19:00"];
-    PV(opening_times_vt_id);
-    auto fast_food_vt_id = serializeWays.tag_values["fast_food"];
-    PV(fast_food_vt_id);
-
-#undef PV
-    for(auto & nt : serializeWays.nodes)
-    {
-        auto &node = nt.second;
-        if (
-            CanFind(node.tags, {name_nt_id, asia_imbiss_vt_id})
-            && CanFind(node.tags, {opening_hours_nt_id, opening_times_vt_id})
-            && CanFind(node.tags, {amenity_nt_id, fast_food_vt_id})
-        )
-        {
-            printf("found the thingy thing ref: %lu\n", node.osmid);
-        }
-        else
-        {
-            // printf("No found no thingy\n");
-        }
-    }
-
     {
         Serializer s {"tags.dat", Serializer::serialize_mode_t::Writing};
 
