@@ -16,6 +16,7 @@ To run it:
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+
 #define CRC32C_IMPLEMENTATION
 #include "crc32.c"
 
@@ -43,7 +44,6 @@ struct Offsets
 } ;
 
 #include "serializer.hpp"
-
 
 template <typename map_t>
 bool CanFind(const map_t& map, const typename map_t::value_type && key_value) {
@@ -74,6 +74,16 @@ struct Node {
         double lat_m;
         //Tags tags;
         short_tags_t tags;
+
+        void print_node()
+        {
+            printf("id: %lu, lon: %f, lat: %f, {#tags %d}\n"
+                , osmid
+                , lon_m
+                , lat_m
+                , (int)tags.size()
+            );
+        }
 };
 
 struct Way
@@ -260,7 +270,7 @@ struct StringTable
 
         // we only need to store the number of strings as we can
         // reproduce the string entires by reading in the null
-        // terminated strings in order. 
+        // terminated strings in order.
         serializer.WriteU32(strings.size());
     }
 
@@ -284,11 +294,11 @@ struct StringTable
             assert((uint32_t)(ptr - begin) == string_data.size());
         }
         // serializer.EndField();
-        
+
         // let's recreate the strings vector
         {
             auto n_strings = serializer.ReadU32();
-            
+
             const char * const string_data_begin = string_data.data();
             const char* string_ptr = string_data.data();
 
@@ -332,12 +342,20 @@ struct SerializeWays
 {
     std::unordered_map<uint64_t, Node> nodes;
 
-	uint64_t max_node_id = 0;
-	uint64_t min_node_id = ~0UL;
+    uint64_t max_node_id = 0;
+    uint64_t min_node_id = ~0UL;
+
+    uint64_t currentBaseNode;
+    uint8_t dependent_nodes[255];
+    uint8_t n_dependent_nodes;
+
+    vector<pair<uint64_t, uint8_t> > baseNodes = {};
+    vector<vector<uint8_t> > childNodes {};
 
     set<uint32_t> street_names_indicies {};
+
     StringTable tag_names {
-//#        include "prime_names.h"
+#        include "prime_names.h"
     };
     StringTable tag_values {};
     vector<Way> ways;
@@ -357,13 +375,31 @@ struct SerializeWays
         return result;
     }
 
-
     void node_callback(uint64_t osmid, double lon, double lat, const Tags &tags) {
-		if (osmid > max_node_id)
-			this->max_node_id = osmid;
-		if (osmid < min_node_id)
-			this->min_node_id = osmid;
-		printf("osmid: %lu\n", osmid);
+        if (osmid > max_node_id)
+            this->max_node_id = osmid;
+        if (osmid < min_node_id)
+            this->min_node_id = osmid;
+
+        auto nDiff = ((int64_t)(osmid - currentBaseNode));
+        // printf("node_id: %lu .. currentBaseNode: %lu - nDiff: %lu\n", osmid, currentBaseNode, nDiff)
+        if (nDiff > 255)
+        {
+            baseNodes.push_back({currentBaseNode, n_dependent_nodes});
+            vector<uint8_t> dependent_nodes_v {};
+            for(int i = 0; i < n_dependent_nodes; i++)
+            {
+                dependent_nodes_v.push_back(dependent_nodes[i]);
+            }
+            childNodes.push_back(dependent_nodes_v);
+            currentBaseNode = osmid;
+            n_dependent_nodes = 0;
+        }
+        else
+        {
+            assert(nDiff > 0 && nDiff <= 255);
+            dependent_nodes[n_dependent_nodes++] = (uint8_t)nDiff;
+        }
         this->nodes[osmid] = Node(osmid, lon, lat, ShortenTags(tags));
     }
 
@@ -387,6 +423,108 @@ struct SerializeWays
 
     // We don't care about relations
     void relation_callback(uint64_t /*osmid*/, const Tags &/*tags*/, const References & /*refs*/){}
+
+    void Serialize(Serializer& serializer)
+    {
+        // First we serialze the tags
+        clock_t serialize_tags_begin = clock();
+        tag_names.Serialize(serializer);
+        tag_values.Serialize(serializer);
+        clock_t serialize_tags_end = clock();
+
+        printf("serialisation of tags took %f milliseconds\n",
+            ((serialize_tags_end - serialize_tags_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
+
+        // now we serialze the nodes.
+        // this will use base_nodes and delta coding
+        printf("number of base_nodes %u\n", (uint32_t) baseNodes.size());
+        printf("number of all nodes %u\n", (uint32_t) nodes.size());
+        // serializer.BeginField("vector<pair<uint64, relativeNodes>>"
+        clock_t serialize_bNodes_begin = clock();
+        int idx = 0;
+# if 1
+        for(auto b : baseNodes)
+        {
+/*			
+            if (idx == 2)
+            {
+                printf("base: ");
+                const auto node_id = b.first;
+                auto base_node = nodes[node_id];
+                base_node.print_node();
+                printf ("# children: %d\n", b.second);
+                auto child_list = childNodes[idx];
+                for(int i = 0;
+                    i < b.second;
+                    i++)
+                {
+                    printf("  ");
+                    auto & child = nodes[node_id + child_list[i]];
+                    child.print_node();
+                }
+            }
+*/
+            // high bytes
+            const auto base_id = b.first;
+            const auto & base_node = nodes[base_id];
+            serializer.WriteU32((uint32_t)(base_id >> 32));
+            // low bytes
+            serializer.WriteU32((uint32_t)base_id);
+            // writing out the number of relative nod
+            serializer.WriteF64(base_node.lat_m);
+            serializer.WriteF64(base_node.lon_m);
+            serializer.WriteShortUint(base_node.tags.size());
+            for(const auto & p : base_node.tags)
+            {
+                serializer.WriteShortUint(p.first);
+                serializer.WriteShortUint(p.second);
+            }
+
+            // number of children
+            serializer.WriteU8(b.second);
+            // child list
+            auto child_list = childNodes[idx];
+            for(int i = 0;
+                i < b.second;
+                i++)
+            {
+                serializer.WriteU8(child_list[i]);
+                // id offset from base no
+                auto & child = nodes[base_id + child_list[i]];
+                serializer.WriteF64(child.lat_m);
+                serializer.WriteF64(child.lon_m);
+                serializer.WriteShortUint(child.tags.size());
+
+                for(const auto & p : child.tags)
+                {
+                    serializer.WriteShortUint(p.first);
+                    serializer.WriteShortUint(p.second);
+                }
+            }
+            idx++;
+        }
+#else
+    for(n : nodes)
+    {
+        Node& node = n.second;
+		serializer.WriteU32((uint32_t)(node.osmid >> 32));
+		// low bytes
+		serializer.WriteU32((uint32_t)node.osmid);
+		// writing out the number of relative nod
+		serializer.WriteF64(node.lat_m);
+		serializer.WriteF64(node.lon_m);
+		serializer.WriteShortUint(node.tags.size());
+		for(const auto & p : node.tags)
+		{
+			serializer.WriteShortUint(p.first);
+			serializer.WriteShortUint(p.second);
+		}
+	}
+#endif
+        clock_t serialize_bNodes_end = clock();
+        printf("serialisation of baseNodes took %f milliseconds\n",
+            ((serialize_bNodes_end - serialize_bNodes_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
+    }
 };
 
 struct Routing {
@@ -578,10 +716,7 @@ int main(int argc, char** argv) {
     {
         Serializer s {"tags.dat", Serializer::serialize_mode_t::Writing};
 
-        // u32 -- number of tags names
-        // u32 -- string data length for tag names
-        serializeWays.tag_names.Serialize(s);
-        serializeWays.tag_values.Serialize(s);
+        serializeWays.Serialize(s);
     }
     {
         Serializer d {"tags.dat", Serializer::serialize_mode_t::Reading};
@@ -598,49 +733,6 @@ int main(int argc, char** argv) {
     return 0;
 }
 
-void test_serializer(void)
-{
-    using serialize_mode_t = Serializer::serialize_mode_t;
-
-    {
-        Serializer writer { "test_s.dat", serialize_mode_t::Writing };
-
-        writer.WriteU32(19);
-        writer.WriteShortUint(29);
-        writer.WriteShortUint(227);
-        uint8_t x[Serializer::BUFFER_SIZE * 2];
-        for(int i = 0;
-            i < Serializer::BUFFER_SIZE * 2;
-            i++
-        )
-        {
-            x[i] = (uint8_t)(i + 1);
-        }
-
-        WRITE_ARRAY_DATA(writer, x);
-        writer.WriteU32(1993 << 13);
-    }
-    {
-        Serializer reader { "test_s.dat", serialize_mode_t::Reading };
-
-        assert(reader.ReadU32() == 19);
-        assert(reader.ReadShortUint() == 29);
-        int result = reader.ReadShortUint();
-        assert(result == 227);
-        uint8_t x[Serializer::BUFFER_SIZE * 2];
-        
-        READ_ARRAY_DATA(reader, x);
-        result = reader.ReadU32();
-        for(int i = 0;
-            i < Serializer::BUFFER_SIZE * 2;
-            i++
-        )
-        {
-            assert(x[i] == (uint8_t)(i + 1));
-        }
-        assert(result == 1993 << 13);
-    }
-}
 /*
  * building | yes • house • residential • garage
    source   | BAG • Bing • cadastre-dgi-fr␣source␣:␣Direction␣Générale␣des␣Impôts␣-␣Cadastre.␣Mise␣à␣jour␣:␣2010 • cadastre-dgi-fr␣source␣:␣Direction␣Générale␣des␣Impôts␣-␣Cadastre.␣Mise␣à␣jour␣:␣2011 • cadastre-dgi-fr␣source␣:␣Direction␣Générale␣des␣Impôts␣-␣Cadastre.␣Mise␣à␣jour␣:␣2012 • bing • NRCan-CanVec-10.0 • microsoft/BuildingFootprints • digitalglobe • YahooJapan/ALPSMAP

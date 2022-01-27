@@ -1,4 +1,7 @@
+#include <assert.h>
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 #include "crc32.c"
 
 struct Serializer
@@ -49,6 +52,12 @@ public:
 
     uint32_t ReadU32(void);
     void WriteU32(uint32_t value);
+
+    void WriteU8(uint8_t);
+    uint8_t ReadU8(void);
+
+    void WriteF64(double);
+    double ReadF64(void);
 } ;
 
 #define WRITE_ARRAY_DATA(WRITER, ARRAY) \
@@ -146,8 +155,7 @@ uint32_t Serializer::ReadShortUint(void) {
     return result;
 }
 
-uint32_t Serializer::WriteFlush(void)
-{
+uint32_t Serializer::WriteFlush (void) {
     assert(m_mode == serialize_mode_t::Writing);
 
     uint32_t bytes_to_flush = FLUSH_GRANULARITY;
@@ -338,4 +346,99 @@ void Serializer::WriteU32(uint32_t value) {
 
     (*(uint32_t*)(buffer + position_in_buffer)) = value;
     position_in_buffer += 4;
+}
+
+uint8_t Serializer::ReadU8(void) {
+    assert(m_mode == serialize_mode_t::Reading);
+
+    if (buffer_used - position_in_buffer < 1)
+    {
+        ReadFlush();
+    }
+    assert(buffer_used - position_in_buffer >= 1);
+    uint8_t result =  (*(uint8_t*)(buffer + position_in_buffer));
+    position_in_buffer += 1;
+    return result;
+}
+
+void Serializer::WriteU8(uint8_t value) {
+    assert(m_mode == serialize_mode_t::Writing);
+
+   if (position_in_buffer >= FLUSH_GRANULARITY)
+   {
+       WriteFlush();
+   }
+
+    (*(uint8_t*)(buffer + position_in_buffer)) = value;
+    position_in_buffer += 1;
+}
+
+double Serializer::ReadF64(void) {
+    assert(m_mode == serialize_mode_t::Reading);
+
+    if (buffer_used - position_in_buffer < sizeof(double))
+    {
+        ReadFlush();
+    }
+    assert(buffer_used - position_in_buffer >= sizeof(double));
+    double result =  (*(double*)(buffer + position_in_buffer));
+    position_in_buffer += sizeof(double);
+    return result;
+}
+
+void Serializer::WriteF64(double value) {
+    assert(m_mode == serialize_mode_t::Writing);
+
+   if (position_in_buffer >= FLUSH_GRANULARITY)
+   {
+       WriteFlush();
+   }
+
+    (*(decltype(value)*)(buffer + position_in_buffer)) = value;
+    position_in_buffer += sizeof(value);
+}
+
+
+
+void test_serializer(void) {
+    using serialize_mode_t = Serializer::serialize_mode_t;
+
+    {
+        Serializer writer { "test_s.dat", serialize_mode_t::Writing };
+
+        writer.WriteU32(19);
+        writer.WriteShortUint(29);
+        writer.WriteShortUint(227);
+        uint8_t x[Serializer::BUFFER_SIZE * 2];
+        for(int i = 0;
+            i < Serializer::BUFFER_SIZE * 2;
+            i++
+        )
+        {
+            x[i] = (uint8_t)(i + 1);
+        }
+
+        WRITE_ARRAY_DATA(writer, x);
+        writer.WriteU32(1993 << 13);
+    }
+    {
+        Serializer reader { "test_s.dat", serialize_mode_t::Reading };
+
+        assert(reader.ReadU32() == 19);
+        assert(reader.ReadShortUint() == 29);
+        int result = reader.ReadShortUint();
+        assert(result == 227);
+        uint8_t x[Serializer::BUFFER_SIZE * 2];
+
+        READ_ARRAY_DATA(reader, x);
+        result = reader.ReadU32();
+        for(int i = 0;
+            i < Serializer::BUFFER_SIZE * 2;
+            i++
+        )
+        {
+            assert(x[i] == (uint8_t)(i + 1));
+        }
+        assert(result == 1993 << 13);
+    }
 }
