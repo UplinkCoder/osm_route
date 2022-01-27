@@ -412,6 +412,7 @@ struct SerializeWays
             uint32_t name_index = 0;
             if (name.size())
             {
+                name_index = tag_values.LookupString(name);
                 street_names_indicies.emplace(name_index);
             }
         }
@@ -507,6 +508,17 @@ struct SerializeWays
         clock_t serialize_bNodes_end = clock();
         printf("serialisation of baseNodes took %f milliseconds\n",
             ((serialize_bNodes_end - serialize_bNodes_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
+            
+        // Now we serialize the street_name indecies
+        {
+            clock_t serialize_street_names_begin = clock();
+            {
+                const street_name_position = serializer.currentPosition();
+            }
+            clock_t serialize_street_names_end = clock();
+        printf("serialisation of baseNodes took %f milliseconds\n",
+            ((serialize_street_names_end - serialize_street_names_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
+        }
     }
 };
 

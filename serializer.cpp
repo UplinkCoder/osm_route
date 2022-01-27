@@ -2,7 +2,17 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+
+#ifdef TEST_MAIN
+#  define HAD_TEST_MAIN
+#  undef TEST_MAIN
+#endif
+
 #include "crc32.c"
+
+#ifdef HAD_TEST_MAIN
+#  define TEST_MAIN
+#endif
 
 struct Serializer
 {
@@ -32,12 +42,19 @@ private:
     uint32_t WriteFlush(void);
 
 public:
-    uint32_t ReadShortUint(void);
+    
 
     Serializer(const char* filename, serialize_mode_t mode);
     ~Serializer();
+    
+    /// returns the current virtual cursor in the file.
+    uint32_t currentPosition(void);
+    
 
-    // Returns number of bytes written. 0 means error.
+    /// Returns number of bytes read. 0 means error.
+    uint8_t ReadShortUint(uint32_t* value);
+    
+    /// Returns number of bytes written. 0 means error.
     uint8_t WriteShortUint(uint32_t value);
 
     /// May not write all the data in one go
@@ -94,6 +111,11 @@ public:
         assert(bytes_left == 0); \
     }
 
+uint32_t Serializer::currentPosition(void)
+{
+    return (position_in_file - buffer_used) + position_in_buffer;
+}
+
 uint32_t Serializer::ReadFlush(void) {
     assert(buffer_used >= position_in_buffer); // general invariant
 
@@ -138,7 +160,7 @@ uint32_t Serializer::WriteFlush (void) {
     return bytes_to_flush;
 }
 
-uint32_t Serializer::ReadShortUint(void) {
+uint8_t Serializer::ReadShortUint(uint32_t* ptr) {
     assert(position_in_buffer < buffer_used);
 
     if ((buffer_used - position_in_buffer) < 4
@@ -153,25 +175,26 @@ uint32_t Serializer::ReadShortUint(void) {
     const auto first_byte = *mem++;
     position_in_buffer++;
 
-    uint32_t result = (first_byte & 0x7f);
+    uint32_t value = (first_byte & 0x7f);
     const auto has_next = (first_byte & 0x80) != 0;
     if (has_next)
     {
         const auto second_byte = *mem++;
         position_in_buffer++;
 
-        result |= ((second_byte & 0x7f) << 7);
+        value |= ((second_byte & 0x7f) << 7);
         const auto has_next2 = (second_byte & 0x80) != 0;
 
         // read next byte
         if (has_next2)
         {
-            result |= ((*(uint16_t*)mem) << 14);
+            value |= ((*(uint16_t*)mem) << 14);
             position_in_buffer += 2;
         }
     }
 
-    return result;
+    *ptr = value;
+    return (uint8_t)(buffer - mem);
 }
 
 Serializer::Serializer(const char* filename, serialize_mode_t mode) :
@@ -399,6 +422,7 @@ void Serializer::WriteF64(double value) {
     position_in_buffer += sizeof(value);
 }
 
+#ifdef TEST_MAIN
 
 static void test_serializer(void) {
     using serialize_mode_t = Serializer::serialize_mode_t;
@@ -425,8 +449,11 @@ static void test_serializer(void) {
         Serializer reader { "test_s.dat", serialize_mode_t::Reading };
 
         assert(reader.ReadU32() == 19);
-        assert(reader.ReadShortUint() == 29);
-        int result = reader.ReadShortUint();
+        uint32_t result;
+        reader.ReadShortUint(&result);
+        assert(result == 29);
+        
+        reader.ReadShortUint(&result);
         assert(result == 227);
         uint8_t x[Serializer::BUFFER_SIZE * 2];
 
@@ -442,3 +469,7 @@ static void test_serializer(void) {
         assert(result == 1993 << 13);
     }
 }
+
+
+
+#endif
