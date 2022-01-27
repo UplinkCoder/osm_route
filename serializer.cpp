@@ -4,14 +4,15 @@
 #include <stdlib.h>
 
 #ifdef TEST_MAIN
-#  define HAD_TEST_MAIN
+#  define HAD_TEST_MAIN_SERIALIZER
 #  undef TEST_MAIN
 #endif
 
 #include "crc32.c"
 
-#ifdef HAD_TEST_MAIN
-#  define TEST_MAIN
+#ifdef HAD_TEST_MAIN_SERIALIZER
+# pragma message("Runninng tests")
+# define TEST_MAIN
 #endif
 
 struct Serializer
@@ -23,6 +24,7 @@ struct Serializer
     serialize_mode_t m_mode;
 
     uint32_t crc;
+    uint32_t invCrc;
 
     uint64_t bytes_in_file      = 0;
     uint64_t position_in_file   = 0;
@@ -42,18 +44,21 @@ private:
     uint32_t WriteFlush(void);
 
 public:
-    
+
 
     Serializer(const char* filename, serialize_mode_t mode);
     ~Serializer();
-    
+
     /// returns the current virtual cursor in the file.
-    uint32_t currentPosition(void);
-    
+    uint32_t CurrentPosition(void);
+
+    /// sets the serializer to a virtual cursor in the file
+    /// Returns: the position it came from
+    uint32_t SetPosition(uint32_t position);
 
     /// Returns number of bytes read. 0 means error.
     uint8_t ReadShortUint(uint32_t* value);
-    
+
     /// Returns number of bytes written. 0 means error.
     uint8_t WriteShortUint(uint32_t value);
 
@@ -111,9 +116,37 @@ public:
         assert(bytes_left == 0); \
     }
 
-uint32_t Serializer::currentPosition(void)
+uint32_t Serializer::CurrentPosition(void)
 {
-    return (position_in_file - buffer_used) + position_in_buffer;
+    return position_in_file - (buffer_used - position_in_buffer);
+    //(position_in_file - buffer_used) + position_in_buffer;
+}
+
+//TODO patching a file using SetPosition invalidates incremental crc
+// therefore once it is used we disable incremental crc and do
+// a full crc at the end
+uint32_t Serializer::SetPosition(uint32_t p) {
+    // disable crc
+    crc = invCrc = 0;
+
+    const auto oldP = CurrentPosition();
+    // flush out the whole buffer if writing
+
+    if (m_mode == serialize_mode_t::Writing) {
+        while(WriteFlush()) {}
+
+        assert(position_in_buffer == 0);
+        assert(buffer_used == 0);
+        // after flushing the whole buffer the cursor should be at the start
+        assert(position_in_file == oldP);
+        // and the position in the file sould be equal to our previous virtual position
+        fseek(fd, p, SEEK_SET);
+        position_in_file = p;
+    } else {
+        assert(!"TODO");
+    }
+
+    return oldP;
 }
 
 uint32_t Serializer::ReadFlush(void) {
@@ -132,7 +165,11 @@ uint32_t Serializer::ReadFlush(void) {
     auto bytes_read = fread(buffer + old_bytes_in_buffer, 1, size_to_read, fd);
     assert(bytes_read == size_to_read);
 
-    crc = crc32c(crc, buffer + old_bytes_in_buffer, size_to_read);
+    if (crc != invCrc)
+    {
+        crc = crc32c(crc, buffer + old_bytes_in_buffer, size_to_read);
+        invCrc = ~crc;
+    }
 
     buffer_used = old_bytes_in_buffer + bytes_read;
     position_in_buffer = 0;
@@ -149,7 +186,11 @@ uint32_t Serializer::WriteFlush (void) {
     if (position_in_buffer < bytes_to_flush)
         bytes_to_flush = position_in_buffer;
 
-    crc = crc32c(crc, buffer, bytes_to_flush);
+    if (crc != invCrc)
+    {
+        crc = crc32c(crc, buffer, bytes_to_flush);
+        invCrc = ~crc;
+    }
     fwrite(buffer, 1, bytes_to_flush, fd);
 
     position_in_file += bytes_to_flush;
@@ -223,6 +264,8 @@ Serializer::Serializer(const char* filename, serialize_mode_t mode) :
             fwrite(&crc, sizeof(crc), 1, fd);
             fwrite(&invCrc, sizeof(invCrc), 1, fd);
             assert(ftell(fd) == 16);
+
+            position_in_file = 16;
         }
         else
         {
@@ -261,17 +304,56 @@ Serializer::~Serializer() {
     if (m_mode == serialize_mode_t::Writing)
     {
         WriteFlush();
-        fseek(fd, 8, SEEK_SET);
-        fwrite(&crc, 1, sizeof(crc), fd);
-        printf("writing crc: %x\n", crc);
-        uint32_t invCrc = ~crc;
-        fwrite(&invCrc, 1, sizeof(invCrc), fd);
-        printf("writing invCrc: %x\n", invCrc);
+
+        if (crc == invCrc)
+        {
+            fflush(fd);
+            fclose(fd);
+
+            crc = ~0;
+            const auto file_size = position_in_file;
+
+            // incremental crc was disabled
+            // we have to do the whole thing now
+            if (fseek(fd, 16, SEEK_SET))
+                if (ferror(fd))
+                    perror("seeking");
+
+            fd = fopen(m_filename, "rb");
+            position_in_file = 16;
+            while(position_in_file < file_size)
+            {
+                const auto bytes_read =
+                    fread(buffer, 1, BUFFER_SIZE, fd);
+                crc = crc32c(crc, buffer, bytes_read);
+                position_in_file += bytes_read;
+                if(!bytes_read)
+                {
+                    if (ferror(fd))
+                        perror("crc_recalc ");
+                    break;
+                }
+            }
+            fclose(fd);
+
+            fd = fopen(m_filename, "r+");
+        }
+
+        {
+            fseek(fd, 8, SEEK_SET);
+            fwrite(&crc, 1, sizeof(crc), fd);
+            uint32_t invCrc_ = ~crc;
+            fwrite(&invCrc_, 1, sizeof(invCrc_), fd);
+        }
     }
     if (m_mode == serialize_mode_t::Reading)
     {
         assert(position_in_file == bytes_in_file);
-        assert(~crc == r_invCrc);
+        if (crc == invCrc)
+        {
+            //TODO recalc crc
+        }
+        else assert(~crc == r_invCrc);
     }
     fclose(fd);
 }
@@ -430,9 +512,16 @@ static void test_serializer(void) {
     {
         Serializer writer { "test_s.dat", serialize_mode_t::Writing };
 
+        auto CurrentPosition = [&writer] (void) {
+            return writer.CurrentPosition();
+        };
         writer.WriteU32(19);
+        assert(CurrentPosition() == 20);
         writer.WriteShortUint(29);
+        assert(CurrentPosition() == 21);
+        const auto second_short_pos = CurrentPosition();
         writer.WriteShortUint(227);
+        assert(CurrentPosition() == 23);
         uint8_t x[Serializer::BUFFER_SIZE * 2];
         for(int i = 0;
             i < Serializer::BUFFER_SIZE * 2;
@@ -443,21 +532,37 @@ static void test_serializer(void) {
         }
 
         WRITE_ARRAY_DATA(writer, x);
+        assert(CurrentPosition() == 23 + sizeof(x));
+
+        const auto oldP = writer.SetPosition(second_short_pos);
+        writer.WriteShortUint(300);
+        writer.SetPosition(oldP);
+
         writer.WriteU32(1993 << 13);
     }
     {
         Serializer reader { "test_s.dat", serialize_mode_t::Reading };
 
+        auto CurrentPosition = [&reader] (void) {
+            return reader.CurrentPosition();
+        };
+
         assert(reader.ReadU32() == 19);
+
+        assert(CurrentPosition() == 20);
         uint32_t result;
         reader.ReadShortUint(&result);
+        assert(CurrentPosition() == 21);
         assert(result == 29);
-        
+
         reader.ReadShortUint(&result);
-        assert(result == 227);
+        assert(result == 300);
+        assert(CurrentPosition() == 23);
         uint8_t x[Serializer::BUFFER_SIZE * 2];
 
         READ_ARRAY_DATA(reader, x);
+        assert(CurrentPosition() == 23 + sizeof(x));
+
         result = reader.ReadU32();
         for(int i = 0;
             i < Serializer::BUFFER_SIZE * 2;
@@ -470,6 +575,8 @@ static void test_serializer(void) {
     }
 }
 
-
-
+int main(int argc, char* argv[])
+{
+    test_serializer();
+}
 #endif

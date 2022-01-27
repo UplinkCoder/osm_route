@@ -21,9 +21,11 @@
 // exports
 
 EXTERN_C uint32_t crc32c(uint32_t crc, const void* s, const uint32_t len_p);
+
 #define FINALIZE_CRC32C(CRC) \
     CRC ^ 0xFFFFFFFF;
 #define INITIAL_CRC32C ((uint32_t)0xFFFFFFFF)
+
 #pragma once
 
 // implementation

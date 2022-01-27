@@ -17,13 +17,23 @@ To run it:
 #include <stdlib.h>
 #include <assert.h>
 
-#include "crc32.c"
-
 #if (__cplusplus <= 201500)
 #  include "string_view.hpp"
    using string_view = bpstd::string_view;
 #else
 #  include <string_view>
+#endif
+
+#ifdef TEST_MAIN
+#  define HAD_TEST_MAIN_ROUTING
+#  undef TEST_MAIN
+#endif
+
+#include "crc32.c"
+#include "serializer.cpp"
+
+#ifdef HAD_TEST_MAIN_ROUTING
+#  define TEST_MAIN
 #endif
 
 #define cast(T) (T)
@@ -40,7 +50,6 @@ struct Offsets
 
 } ;
 
-#include "serializer.hpp"
 
 template <typename map_t>
 bool CanFind(const map_t& map, const typename map_t::value_type && key_value) {
@@ -424,12 +433,25 @@ struct SerializeWays
 
     void Serialize (Serializer& serializer)
     {
+        // First we reserve space for the index
+        const auto index_p = serializer.CurrentPosition();
+        serializer.WriteU32(index_p + 16); // beginning tag names
+        serializer.WriteU32(0); // beginning tag values
+        serializer.WriteU32(0); // beginning street_names
+        serializer.WriteU32(0); // beginning nodes
+
+
         {
-        // First we serialze the tags
+            // then we serialze the tags
             clock_t serialize_tags_begin = clock();
             {
                 tag_names.Serialize(serializer);
+                const auto tag_value_pos = serializer.CurrentPosition();
                 tag_values.Serialize(serializer);
+                // after serializng we go back and poke the value in
+                const auto after_tag_values = serializer.SetPosition(index_p + 4);
+                serializer.WriteU32(tag_value_pos);
+                serializer.SetPosition(after_tag_values);
             }
             clock_t serialize_tags_end = clock();
 
@@ -508,15 +530,16 @@ struct SerializeWays
         clock_t serialize_bNodes_end = clock();
         printf("serialisation of baseNodes took %f milliseconds\n",
             ((serialize_bNodes_end - serialize_bNodes_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
-            
+
         // Now we serialize the street_name indecies
         {
             clock_t serialize_street_names_begin = clock();
             {
-                const street_name_position = serializer.currentPosition();
+                const auto street_name_position = serializer.CurrentPosition();
+
             }
             clock_t serialize_street_names_end = clock();
-        printf("serialisation of baseNodes took %f milliseconds\n",
+        printf("serialisation of street names took %f milliseconds\n",
             ((serialize_street_names_end - serialize_street_names_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
         }
     }
@@ -587,8 +610,6 @@ struct Routing {
 };
 
 int main(int argc, char** argv) {
-    test_serializer();
-
      if(argc != 2 && argc != 3) {
         std::cout << "Usage: " << argv[0] << " file_to_read.osm.pbf" << std::endl;
         return 1;
