@@ -18,15 +18,15 @@
 #  define EXTERN_C extern
 #endif
 
+// exports
 
 EXTERN_C uint32_t crc32c(uint32_t crc, const void* s, const uint32_t len_p);
 #define FINALIZE_CRC32C(CRC) \
     CRC ^ 0xFFFFFFFF;
 #define INITIAL_CRC32C ((uint32_t)0xFFFFFFFF)
-
-#ifdef CRC32C_IMPLEMENTATION
-
 #pragma once
+
+// implementation
 
 #ifndef NO_CRC32C_TABLE
 static const uint32_t crc32Table[256] = {
@@ -220,6 +220,3 @@ int main(int argc, char* argv[])
 #undef CRC32C_S
 }
 #endif // TEST_MAIN
-#else
-
-#endif

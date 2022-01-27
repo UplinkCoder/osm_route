@@ -17,7 +17,6 @@ To run it:
 #include <stdlib.h>
 #include <assert.h>
 
-#define CRC32C_IMPLEMENTATION
 #include "crc32.c"
 
 #if (__cplusplus <= 201500)
