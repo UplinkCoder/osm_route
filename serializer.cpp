@@ -62,6 +62,13 @@ public:
     /// Returns number of bytes written. 0 means error.
     uint8_t WriteShortUint(uint32_t value);
 
+    /// Returns number of bytes read. 0 means error.
+    uint8_t ReadShortInt(int32_t* value);
+
+    /// Returns number of bytes written. 0 means error.
+    uint8_t WriteShortInt(int32_t value);
+
+
     /// May not write all the data in one go
     /// use in a loop or via the WRITE_ARRAY_DATA_SIZE macro
     /// Returns the number of bytes written
@@ -204,42 +211,6 @@ uint32_t Serializer::WriteFlush (void) {
     return bytes_to_flush;
 }
 
-uint8_t Serializer::ReadShortUint(uint32_t* ptr) {
-    assert(position_in_buffer <= buffer_used);
-
-    if ((buffer_used - position_in_buffer) < 4
-        && bytes_in_file - position_in_file > 0)
-    {
-        ReadFlush();
-    }
-
-    assert(buffer_used >= 1);
-
-    auto mem = buffer + position_in_buffer;
-    const auto first_byte = *mem++;
-    position_in_buffer++;
-
-    uint32_t value = (first_byte & 0x7f);
-    const auto has_next = (first_byte & 0x80) != 0;
-    if (has_next)
-    {
-        const auto second_byte = *mem++;
-        position_in_buffer++;
-
-        value |= ((second_byte & 0x7f) << 7);
-        const auto has_next2 = (second_byte & 0x80) != 0;
-
-        // read next byte
-        if (has_next2)
-        {
-            value |= ((*(uint16_t*)mem) << 14);
-            position_in_buffer += 2;
-        }
-    }
-
-    *ptr = value;
-    return (uint8_t)(buffer - mem);
-}
 
 Serializer::Serializer(const char* filename, serialize_mode_t mode) :
     m_filename(filename), m_mode(mode), crc(~0)  {
@@ -357,6 +328,43 @@ Serializer::~Serializer() {
     fclose(fd);
 }
 
+uint8_t Serializer::ReadShortUint(uint32_t* ptr) {
+    assert(position_in_buffer <= buffer_used);
+
+    if ((buffer_used - position_in_buffer) < 4
+        && bytes_in_file - position_in_file > 0)
+    {
+        ReadFlush();
+    }
+
+    assert(buffer_used >= 1);
+
+    auto mem = buffer + position_in_buffer;
+    const auto first_byte = *mem++;
+    position_in_buffer++;
+
+    uint32_t value = (first_byte & 0x7f);
+    const auto has_next = (first_byte & 0x80) != 0;
+    if (has_next)
+    {
+        const auto second_byte = *mem++;
+        position_in_buffer++;
+
+        value |= ((second_byte & 0x7f) << 7);
+        const auto has_next2 = (second_byte & 0x80) != 0;
+
+        // read next byte
+        if (has_next2)
+        {
+            value |= ((*(uint16_t*)mem) << 14);
+            position_in_buffer += 2;
+        }
+    }
+
+    *ptr = value;
+    return (uint8_t)(buffer - mem);
+}
+
 uint8_t Serializer::WriteShortUint(uint32_t value) {
     assert(m_mode == serialize_mode_t::Writing);
 
@@ -387,6 +395,94 @@ uint8_t Serializer::WriteShortUint(uint32_t value) {
         buffer[position_in_buffer++] = (uint8_t)(value >> 22);
         return 4;
     }
+}
+
+#define ABS(VALUE) \
+    (((VALUE) > 0) ? (VALUE) : (~(VALUE)) + 1)
+
+uint8_t Serializer::WriteShortInt(int32_t value) {
+    assert(m_mode == serialize_mode_t::Writing);
+    uint32_t abs_value = ABS(value);
+    
+    if ((((uint32_t)abs_value) & 0x60000000))
+    {
+        printf("value of out range: %d\n", value);
+        
+    }
+ 
+    assert((ABS(value) & 0x60000000) == 0);
+    
+    bool isNegative = ((value & (1 << 31)) != 0);
+    // printf("isNegative: %d\n", isNegative);
+    uint32_t transformed_value = (abs_value << 1) | isNegative;
+    
+    if (position_in_buffer >= FLUSH_GRANULARITY)
+    {
+        // try to flush in 4092 chunks
+        WriteFlush();
+    }
+    
+    if (abs_value < (1 << 6))
+    {
+        buffer[position_in_buffer++] = (uint8_t)transformed_value;
+        return 1;
+    }
+    else if (abs_value < (1 << 13))
+    {
+        buffer[position_in_buffer++] = (uint8_t)(transformed_value | 0x80);
+        buffer[position_in_buffer++] = (uint8_t)(transformed_value >> 7);
+        return 2;
+    }
+    else
+    {
+        buffer[position_in_buffer++] = (uint8_t)((transformed_value >> 0) | 0x80);
+        buffer[position_in_buffer++] = (uint8_t)((transformed_value >> 7) | 0x80);
+        buffer[position_in_buffer++] = (uint8_t)(transformed_value >> 14);
+        buffer[position_in_buffer++] = (uint8_t)(transformed_value >> 22);
+        return 4;
+    }
+}
+
+uint8_t Serializer::ReadShortInt(int32_t* ptr) {
+    assert(position_in_buffer <= buffer_used);
+
+    if ((buffer_used - position_in_buffer) < 4
+        && bytes_in_file - position_in_file > 0)
+    {
+        ReadFlush();
+    }
+
+    assert(buffer_used >= 1);
+
+    auto mem = buffer + position_in_buffer;
+    const auto first_byte = *mem++;
+    position_in_buffer++;
+
+    bool isNegative = first_byte & 1;
+    uint32_t value = ((first_byte & 0x7f) >> 1);
+    
+    const auto has_next = (first_byte & 0x80) != 0;
+    if (has_next)
+    {
+        const auto second_byte = *mem++;
+        position_in_buffer++;
+
+        value |= ((second_byte & 0x7f) << 6);
+        const auto has_next2 = (second_byte & 0x80) != 0;
+
+        // read next byte
+        if (has_next2)
+        {
+            value |= ((*(uint16_t*)mem) << 13);
+            position_in_buffer += 2;
+        }
+    }
+
+    if (isNegative)
+        value = ~value + 1;
+    *ptr = (int32_t)value;
+    
+    return (uint8_t)(buffer - mem);
 }
 
 uint32_t Serializer::WriteRawData(const void* data, uint32_t size) {
@@ -563,6 +659,35 @@ static void test_serializer(void) {
         writer.SetPosition(oldP);
 
         writer.WriteU32(1993 << 13);
+        
+                
+        for(int32_t v = -(1 << 3);
+            v < (-(1 << 3)) + 128;
+            v++)
+        {
+            writer.WriteShortInt(v);
+        }
+
+        for(int32_t v = -(1 << 11);
+            v < (-(1 << 3)) + 128;
+            v++)
+        {
+            writer.WriteShortInt(v);
+        }
+        
+        for(int32_t v = -(1 << 14);
+            v < (-(1 << 14)) + 128;
+            v++)
+        {
+            writer.WriteShortInt(v);
+        }
+        
+        for(int32_t v = (1 << 14);
+            v < ((1 << 14)) + 128;
+            v++)
+        {
+            writer.WriteShortInt(v);
+        }
     }
     {
         Serializer reader { "test_s.dat", serialize_mode_t::Reading };
@@ -572,7 +697,6 @@ static void test_serializer(void) {
         };
 
         assert(reader.ReadU32() == 19);
-
         assert(CurrentPosition() == 20);
         uint32_t result;
         reader.ReadShortUint(&result);
@@ -596,6 +720,43 @@ static void test_serializer(void) {
             assert(x[i] == (uint8_t)(i + 1));
         }
         assert(result == 1993 << 13);
+        
+        for (int32_t v = -(1 << 3);
+            v < (-(1 << 3)) + 128;
+            v++)
+        {
+            int32_t read_value;
+            reader.ReadShortInt(&read_value);
+            assert (read_value == v);
+        }
+        
+        
+        for (int32_t v = -(1 << 11);
+            v < (-(1 << 3)) + 128;
+            v++)
+        {
+            int32_t read_value;
+            reader.ReadShortInt(&read_value);
+            assert (read_value == v);
+        }
+        
+        for (int32_t v = -(1 << 14);
+            v < (-(1 << 14)) + 128;
+            v++)
+        {
+            int32_t read_value;
+            reader.ReadShortInt(&read_value);
+            assert (read_value == v);
+        }
+        
+        for (int32_t v = (1 << 14);
+            v < ((1 << 14)) + 128;
+            v++)
+        {
+            int32_t read_value;
+            reader.ReadShortInt(&read_value);
+            assert (read_value == v);
+        }
     }
 }
 
