@@ -458,6 +458,28 @@ struct SerializeWays
             printf("serialisation of tags took %f milliseconds\n",
                 ((serialize_tags_end - serialize_tags_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
         }
+
+        // Now we serialize the street_name indecies
+        {
+            clock_t serialize_street_names_begin = clock();
+            {
+                const auto street_name_position = serializer.CurrentPosition();
+                const auto oldP = serializer.SetPosition(index_p + 8);
+                {
+                    serializer.WriteU32(street_name_position);
+                }
+                serializer.SetPosition(oldP);
+
+                serializer.WriteU32(street_name_indicies.size());
+                for(auto& e : street_name_indicies)
+                    serializer.WriteShortUint(e);
+            }
+            clock_t serialize_street_names_end = clock();
+            printf("serialisation of street names took %f milliseconds\n",
+                ((serialize_street_names_end - serialize_street_names_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
+        }
+
+
         // now we serialze the nodes.
         // this will use base_nodes and delta coding
         printf("number of base_nodes %u\n", (uint32_t) baseNodes.size());
@@ -514,23 +536,6 @@ struct SerializeWays
         printf("serialisation of baseNodes took %f milliseconds\n",
             ((serialize_bNodes_end - serialize_bNodes_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
 
-        // Now we serialize the street_name indecies
-        {
-            clock_t serialize_street_names_begin = clock();
-            {
-                const auto street_name_position = serializer.CurrentPosition();
-                const auto oldP = serializer.SetPosition(index_p + 8);
-                serializer.WriteU32(street_name_position);
-                serializer.SetPosition(oldP);
-                serializer.WriteU32(street_name_indicies.size());
-                for(auto& e : street_name_indicies)
-                    serializer.WriteShortUint(e);
-            }
-            clock_t serialize_street_names_end = clock();
-            printf("serialisation of street names took %f milliseconds\n",
-                ((serialize_street_names_end - serialize_street_names_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
-        }
-
         clock_t serialize_ways_begin = clock();
         {
             const auto ways_start = serializer.CurrentPosition();
@@ -579,6 +584,18 @@ struct SerializeWays
         const auto street_names_off = serializer.ReadU32(); // beginning street_names
         const auto nodes_off = serializer.ReadU32(); // beginning nodes
 
+        tag_names.DeSerialize(serializer);
+        tag_values.DeSerialize(serializer);
+
+        uint32_t n_street_names = serializer.ReadU32();
+        for (uint32_t i = 0;
+            i < n_street_names;
+            i++)
+        {
+            uint32_t value;
+            serializer.ReadShortUint(&value);
+            street_name_indicies.insert(value);
+        }
     }
 
 };
