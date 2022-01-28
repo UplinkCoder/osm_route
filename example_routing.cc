@@ -469,6 +469,7 @@ struct DeSerializeWays
 
                 if (n_refs)
                 {
+                    w.refs.resize(n_refs);
                     const auto base_ref = serializer.ReadU64();
 
                     for(uint32_t i = 1;
@@ -661,7 +662,6 @@ struct SerializeWays
 
             for(auto b : baseNodes)
             {
-
                 const auto base_id = b.first;
                 const auto & base_node = nodes[base_id];
                 serializer.WriteU64(base_id);
@@ -708,7 +708,7 @@ struct SerializeWays
         clock_t serialize_ways_begin = clock();
         {
             const auto ways_start = serializer.CurrentPosition();
-            const auto oldP = serializer.SetPosition(index_p + 12);
+            const auto oldP = serializer.SetPosition(index_p + 16);
             serializer.WriteU32(ways_start);
             serializer.SetPosition(oldP);
 
@@ -721,7 +721,6 @@ struct SerializeWays
                     serializer.WriteShortUint(p.first);
                     serializer.WriteShortUint(p.second);
                 }
-
 
                 auto base_ref = w.refs[0];
                 const auto n_refs = w.refs.size();
