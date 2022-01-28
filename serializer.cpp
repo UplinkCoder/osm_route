@@ -44,8 +44,6 @@ private:
     uint32_t WriteFlush(void);
 
 public:
-
-
     Serializer(const char* filename, serialize_mode_t mode);
     ~Serializer();
 
@@ -398,30 +396,32 @@ uint8_t Serializer::WriteShortUint(uint32_t value) {
 }
 
 #define ABS(VALUE) \
-    (((VALUE) > 0) ? (VALUE) : (~(VALUE)) + 1)
+    (((VALUE) > (decltype(VALUE))0L) ? (VALUE) : (~(VALUE)) + 1)
+
+inline bool FitsInShortInt(int64_t value)
+{
+    return (ABS(value) & 0xffffffff60000000) == 0;
+}
 
 uint8_t Serializer::WriteShortInt(int32_t value) {
     assert(m_mode == serialize_mode_t::Writing);
     uint32_t abs_value = ABS(value);
-    
-    if ((((uint32_t)abs_value) & 0x60000000))
+
+    if (abs_value & 0x60000000)
     {
-        printf("value of out range: %d\n", value);
-        
+        return 0;
     }
- 
-    assert((ABS(value) & 0x60000000) == 0);
-    
+
     bool isNegative = ((value & (1 << 31)) != 0);
     // printf("isNegative: %d\n", isNegative);
     uint32_t transformed_value = (abs_value << 1) | isNegative;
-    
+
     if (position_in_buffer >= FLUSH_GRANULARITY)
     {
         // try to flush in 4092 chunks
         WriteFlush();
     }
-    
+
     if (abs_value < (1 << 6))
     {
         buffer[position_in_buffer++] = (uint8_t)transformed_value;
@@ -460,7 +460,7 @@ uint8_t Serializer::ReadShortInt(int32_t* ptr) {
 
     bool isNegative = first_byte & 1;
     uint32_t value = ((first_byte & 0x7f) >> 1);
-    
+
     const auto has_next = (first_byte & 0x80) != 0;
     if (has_next)
     {
@@ -481,7 +481,7 @@ uint8_t Serializer::ReadShortInt(int32_t* ptr) {
     if (isNegative)
         value = ~value + 1;
     *ptr = (int32_t)value;
-    
+
     return (uint8_t)(buffer - mem);
 }
 
@@ -626,6 +626,8 @@ void Serializer::WriteF64(double value) {
 
 #ifdef TEST_MAIN
 
+#undef ABS
+
 static void test_serializer(void) {
     using serialize_mode_t = Serializer::serialize_mode_t;
 
@@ -659,8 +661,8 @@ static void test_serializer(void) {
         writer.SetPosition(oldP);
 
         writer.WriteU32(1993 << 13);
-        
-                
+
+
         for(int32_t v = -(1 << 3);
             v < (-(1 << 3)) + 128;
             v++)
@@ -674,14 +676,14 @@ static void test_serializer(void) {
         {
             writer.WriteShortInt(v);
         }
-        
+
         for(int32_t v = -(1 << 14);
             v < (-(1 << 14)) + 128;
             v++)
         {
             writer.WriteShortInt(v);
         }
-        
+
         for(int32_t v = (1 << 14);
             v < ((1 << 14)) + 128;
             v++)
@@ -720,7 +722,7 @@ static void test_serializer(void) {
             assert(x[i] == (uint8_t)(i + 1));
         }
         assert(result == 1993 << 13);
-        
+
         for (int32_t v = -(1 << 3);
             v < (-(1 << 3)) + 128;
             v++)
@@ -729,8 +731,8 @@ static void test_serializer(void) {
             reader.ReadShortInt(&read_value);
             assert (read_value == v);
         }
-        
-        
+
+
         for (int32_t v = -(1 << 11);
             v < (-(1 << 3)) + 128;
             v++)
@@ -739,7 +741,7 @@ static void test_serializer(void) {
             reader.ReadShortInt(&read_value);
             assert (read_value == v);
         }
-        
+
         for (int32_t v = -(1 << 14);
             v < (-(1 << 14)) + 128;
             v++)
@@ -748,7 +750,7 @@ static void test_serializer(void) {
             reader.ReadShortInt(&read_value);
             assert (read_value == v);
         }
-        
+
         for (int32_t v = (1 << 14);
             v < ((1 << 14)) + 128;
             v++)

@@ -94,7 +94,7 @@ struct Node {
 
 struct Way
 {
-    Way(uint64_t osmid_, std::vector<uint64_t> refs_, short_tags_t tags_) :
+    Way(uint64_t osmid_ = {}, std::vector<uint64_t> refs_ = {}, short_tags_t tags_ = {}) :
         osmid(osmid_), refs(refs_), tags(tags_) {}
 
     uint64_t osmid;
@@ -354,6 +354,20 @@ struct DeSerializeWays
     std::unordered_map<uint64_t, Node> nodes;
     vector<Way> ways;
 
+    void ReadTags(Serializer& serializer, short_tags_t* tags)
+    {
+        uint32_t n_tags;
+        serializer.ReadShortUint(&n_tags);
+        tags->reserve(n_tags);
+        for(uint32_t itag = 0; itag < n_tags; itag++)
+        {
+            uint32_t name_index, value_index;
+            serializer.ReadShortUint(&name_index);
+            serializer.ReadShortUint(&value_index);
+            tags->emplace(name_index, value_index);
+        }
+    }
+
     void DeSerialize (Serializer& serializer)
     {
         const auto tag_names_off = serializer.ReadU32(); // beginning tag names
@@ -397,7 +411,7 @@ struct DeSerializeWays
         {
             const auto p = serializer.CurrentPosition();
             assert(p == nodes_off);
- 
+
             const auto n_nodes = serializer.ReadU32();
             nodes.reserve(n_nodes);
 
@@ -411,22 +425,13 @@ struct DeSerializeWays
                 {
                     const auto base_id = serializer.ReadU64();
                     auto& n = nodes[base_id];
-                    
+
                     n.osmid = base_id;
                     // writing out the number of relative nod
                     n.lat_m = serializer.ReadF64();
                     n.lon_m = serializer.ReadF64();
-                    uint32_t n_tags;
-                    serializer.ReadShortUint(&n_tags);
-                    n.tags.reserve(n_tags);
-                    for(uint32_t itag = 0; itag < n_tags; itag++)
-                    {
-                        uint32_t name_index, value_index;
-                        serializer.ReadShortUint(&name_index);
-                        serializer.ReadShortUint(&value_index);
-                        n.tags.emplace(name_index, value_index);
-                    }
-                    
+                    ReadTags(serializer, &n.tags);
+
                     // number of children
                     uint32_t n_children = serializer.ReadU8();
 
@@ -440,19 +445,7 @@ struct DeSerializeWays
 
                         child.lat_m = serializer.ReadF64();
                         child.lon_m = serializer.ReadF64();
-                        uint32_t n_child_tags;
-                        serializer.ReadShortUint(&n_child_tags);
-                        child.tags.reserve(n_child_tags);
-
-                        for(uint32_t itag = 0;
-                            itag < n_child_tags;
-                            itag++)
-                        {
-                            uint32_t name_index, value_index;
-                            serializer.ReadShortUint(&name_index);
-                            serializer.ReadShortUint(&value_index);
-                            child.tags.emplace(name_index, value_index);
-                        }
+                        ReadTags(serializer, &child.tags);
                     }
                 }
             }
@@ -461,6 +454,43 @@ struct DeSerializeWays
             printf("deserialisation of nodes took %f milliseconds\n",
                 ((deserialize_nodes_end - deserialize_nodes_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
         }
+
+        const auto n_ways = serializer.ReadU32();
+        ways.resize(n_ways);
+
+        clock_t deserialize_ways_begin = clock();
+        {
+            for(auto& w : ways)
+            {
+                ReadTags(serializer, &w.tags);
+
+                uint32_t n_refs;
+                serializer.ReadShortUint(&n_refs);
+
+                if (n_refs)
+                {
+                    const auto base_ref = serializer.ReadU64();
+
+                    for(uint32_t i = 1;
+                        i < n_refs;
+                        i++)
+                    {
+                        int32_t delta;
+                        serializer.ReadShortInt(&delta);
+
+                        w.refs[i] = base_ref + delta;
+                        if (delta == 0)
+                        {
+                            w.refs[i] = serializer.ReadU64();
+                        }
+                    }
+                }
+            }
+        }
+        clock_t deserialize_ways_end = clock();
+        printf("deserialisation of ways took %f milliseconds\n",
+            ((deserialize_ways_end - deserialize_ways_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
+
     }
 } ;
 
@@ -631,7 +661,7 @@ struct SerializeWays
 
             for(auto b : baseNodes)
             {
-                
+
                 const auto base_id = b.first;
                 const auto & base_node = nodes[base_id];
                 serializer.WriteU64(base_id);
@@ -639,7 +669,7 @@ struct SerializeWays
                 serializer.WriteF64(base_node.lat_m);
                 serializer.WriteF64(base_node.lon_m);
                 serializer.WriteShortUint(base_node.tags.size());
-            
+
                 for(const auto & p : base_node.tags)
                 {
                     serializer.WriteShortUint(p.first);
@@ -691,8 +721,8 @@ struct SerializeWays
                     serializer.WriteShortUint(p.first);
                     serializer.WriteShortUint(p.second);
                 }
-                
-                
+
+
                 auto base_ref = w.refs[0];
                 const auto n_refs = w.refs.size();
                 serializer.WriteShortUint(n_refs);
@@ -705,7 +735,18 @@ struct SerializeWays
                     i < n_refs;
                     i++)
                 {
-                    serializer.WriteShortInt(w.refs[i] - base_ref);
+                    int64_t diff = w.refs[i] - base_ref;
+                    if (FitsInShortInt(diff))
+                    {
+                        serializer.WriteShortInt(w.refs[i] - base_ref);
+                    }
+                    else
+                    {
+                        serializer.WriteU8(0);
+                        // a 0 can't be a vaild ShortInt in this case.
+                        // therefore the deserializer knows that a raw U64 comes in
+                        serializer.WriteU64(w.refs[i]);
+                    }
                 }
             }
         }
