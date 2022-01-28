@@ -77,10 +77,10 @@ public:
 
     void WriteU8(uint8_t);
     uint8_t ReadU8(void);
-    
+
     void WriteU64(uint64_t value);
     uint64_t ReadU64(void);
-    
+
     void WriteF64(double);
     double ReadF64(void);
 } ;
@@ -205,7 +205,7 @@ uint32_t Serializer::WriteFlush (void) {
 }
 
 uint8_t Serializer::ReadShortUint(uint32_t* ptr) {
-    assert(position_in_buffer < buffer_used);
+    assert(position_in_buffer <= buffer_used);
 
     if ((buffer_used - position_in_buffer) < 4
         && bytes_in_file - position_in_file > 0)
@@ -213,7 +213,7 @@ uint8_t Serializer::ReadShortUint(uint32_t* ptr) {
         ReadFlush();
     }
 
-    assert(buffer_used > 1);
+    assert(buffer_used >= 1);
 
     auto mem = buffer + position_in_buffer;
     const auto first_byte = *mem++;
