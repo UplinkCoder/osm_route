@@ -77,7 +77,10 @@ public:
 
     void WriteU8(uint8_t);
     uint8_t ReadU8(void);
-
+    
+    void WriteU64(uint64_t value);
+    uint64_t ReadU64(void);
+    
     void WriteF64(double);
     double ReadF64(void);
 } ;
@@ -473,6 +476,31 @@ void Serializer::WriteU8(uint8_t value) {
 
     (*(uint8_t*)(buffer + position_in_buffer)) = value;
     position_in_buffer += 1;
+}
+
+uint64_t Serializer::ReadU64(void) {
+    assert(m_mode == serialize_mode_t::Reading);
+
+    if (buffer_used - position_in_buffer < 8)
+    {
+        ReadFlush();
+    }
+    assert(buffer_used - position_in_buffer >= 8);
+    uint64_t result =  (*(uint64_t*)(buffer + position_in_buffer));
+    position_in_buffer += sizeof(result);
+    return result;
+}
+
+void Serializer::WriteU64(uint64_t value) {
+    assert(m_mode == serialize_mode_t::Writing);
+
+   if (position_in_buffer >= FLUSH_GRANULARITY)
+   {
+       WriteFlush();
+   }
+
+    (*(uint64_t*)(buffer + position_in_buffer)) = value;
+    position_in_buffer += sizeof(value);
 }
 
 double Serializer::ReadF64(void) {

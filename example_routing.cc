@@ -364,6 +364,7 @@ struct SerializeWays
 #        include "prime_names.h"
     };
     StringTable tag_values {};
+
     vector<Way> ways;
 
     short_tags_t ShortenTags(const Tags& tags) {
@@ -468,28 +469,9 @@ struct SerializeWays
 
         for(auto b : baseNodes)
         {
-/*
-            if (idx == 2)
-            {
-                printf("base: ");
-                const auto node_id = b.first;
-                auto base_node = nodes[node_id];
-                base_node.print_node();
-                printf ("# children: %d\n", b.second);
-                auto child_list = childNodes[idx];
-                for(int i = 0;
-                    i < b.second;
-                    i++)
-                {
-                    printf("  ");
-                    auto & child = nodes[node_id + child_list[i]];
-                    child.print_node();
-                }
-            }
-*/
-            // high bytes
             const auto base_id = b.first;
             const auto & base_node = nodes[base_id];
+            // high bytes
             serializer.WriteU32((uint32_t)(base_id >> 32));
             // low bytes
             serializer.WriteU32((uint32_t)base_id);
@@ -527,6 +509,7 @@ struct SerializeWays
             }
             idx++;
         }
+
         clock_t serialize_bNodes_end = clock();
         printf("serialisation of baseNodes took %f milliseconds\n",
             ((serialize_bNodes_end - serialize_bNodes_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
@@ -544,22 +527,60 @@ struct SerializeWays
                     serializer.WriteShortUint(e);
             }
             clock_t serialize_street_names_end = clock();
-        printf("serialisation of street names took %f milliseconds\n",
-            ((serialize_street_names_end - serialize_street_names_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
+            printf("serialisation of street names took %f milliseconds\n",
+                ((serialize_street_names_end - serialize_street_names_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
         }
 
         clock_t serialize_ways_begin = clock();
         {
-                const auto ways_start = serializer.CurrentPosition();
-                const auto oldP = serializer.SetPosition(index_p + 12);
-                serializer.WriteU32(ways_start);
-                serializer.SetPosition(oldP);
+            const auto ways_start = serializer.CurrentPosition();
+            const auto oldP = serializer.SetPosition(index_p + 12);
+            serializer.WriteU32(ways_start);
+            serializer.SetPosition(oldP);
+
+            serializer.WriteU32(ways.size());
+            for(const auto& w : ways)
+            {
+                serializer.WriteShortUint(w.tags.size());
+                for(const auto & p : w.tags)
+                {
+                    serializer.WriteShortUint(p.first);
+                    serializer.WriteShortUint(p.second);
+                }
+                const auto baseRef = w.refs[0];
+                serializer.WriteU64(baseRef);
+
+                serializer.WriteShortUint(w.refs.size());
+                for(const auto & ref : w.refs)
+                {
+                    auto diff = (int)(ref - baseRef);
+                    if (diff > (1 << 29)
+                        || diff < -(1 << 29))
+                    {
+                        assert(0);
+                    }
+                    else
+                    {
+                        serializer.WriteShortUint(baseRef - ref);
+                    }
+                }
+            }
         }
         clock_t serialize_ways_end = clock();
-        printf("serialisation of street names took %f milliseconds\n",
+        printf("serialisation of ways took %f milliseconds\n",
             ((serialize_ways_end - serialize_ways_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
 
     }
+
+    void DeSerialize (Serializer& serializer)
+    {
+        const auto tag_names_off = serializer.ReadU32(); // beginning tag names
+        const auto tag_values_off = serializer.ReadU32(); // beginning tag values
+        const auto street_names_off = serializer.ReadU32(); // beginning street_names
+        const auto nodes_off = serializer.ReadU32(); // beginning nodes
+
+    }
+
 };
 
 struct Routing {
@@ -712,14 +733,8 @@ int main(int argc, char** argv) {
     {
         Serializer d {"tags.dat", Serializer::serialize_mode_t::Reading};
 
-        StringTable d_tag_names {};
-        StringTable d_tag_values {};
-
-        d_tag_names.DeSerialize(d);
-        d_tag_values.DeSerialize(d);
-
-        printf("deserilzed tag-keys: %d\n", (int)d_tag_names.strings.size());
-        printf("deserilzed tag-values: %d\n", (int)d_tag_values.strings.size());
+        SerializeWays ws;
+        ws.DeSerialize(d);
     }
     return 0;
 }
