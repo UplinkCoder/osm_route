@@ -411,7 +411,7 @@ uint8_t Serializer::WriteShortInt(int32_t value) {
     {
         return 0;
     }
-
+    uint8_t result;
     bool isNegative = ((value & (1 << 31)) != 0);
     // printf("isNegative: %d\n", isNegative);
     uint32_t transformed_value = (abs_value << 1) | isNegative;
@@ -425,13 +425,13 @@ uint8_t Serializer::WriteShortInt(int32_t value) {
     if (abs_value < (1 << 6))
     {
         buffer[position_in_buffer++] = (uint8_t)transformed_value;
-        return 1;
+        result = 1;
     }
     else if (abs_value < (1 << 13))
     {
         buffer[position_in_buffer++] = (uint8_t)(transformed_value | 0x80);
         buffer[position_in_buffer++] = (uint8_t)(transformed_value >> 7);
-        return 2;
+        result = 2;
     }
     else
     {
@@ -439,8 +439,10 @@ uint8_t Serializer::WriteShortInt(int32_t value) {
         buffer[position_in_buffer++] = (uint8_t)((transformed_value >> 7) | 0x80);
         buffer[position_in_buffer++] = (uint8_t)(transformed_value >> 14);
         buffer[position_in_buffer++] = (uint8_t)(transformed_value >> 22);
-        return 4;
+        result = 4;
     }
+
+    return result;
 }
 
 uint8_t Serializer::ReadShortInt(int32_t* ptr) {
@@ -577,9 +579,13 @@ void Serializer::WriteU8(uint8_t value) {
 uint64_t Serializer::ReadU64(void) {
     assert(m_mode == serialize_mode_t::Reading);
 
-    if (buffer_used - position_in_buffer < 8)
+    if ((buffer_used - position_in_buffer) < 8)
     {
         ReadFlush();
+    }
+    if (buffer_used - position_in_buffer < 8)
+    {
+        int k = 12;
     }
     assert(buffer_used - position_in_buffer >= 8);
     uint64_t result =  (*(uint64_t*)(buffer + position_in_buffer));

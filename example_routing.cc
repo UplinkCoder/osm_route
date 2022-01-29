@@ -460,8 +460,21 @@ struct DeSerializeWays
 
         clock_t deserialize_ways_begin = clock();
         {
+            uint64_t base_way_osmid = 0;
             for(auto& w : ways)
             {
+                int32_t osmid_delta;
+                serializer.ReadShortInt(&osmid_delta);
+
+                w.osmid = base_way_osmid + osmid_delta;
+                base_way_osmid = w.osmid;
+            }
+
+            uint64_t cafebabe = serializer.ReadU64();
+
+            for(auto& w : ways)
+            {
+                // assert(w.osmid != 3999576);
                 ReadTags(serializer, &w.tags);
 
                 uint32_t n_refs;
@@ -471,6 +484,7 @@ struct DeSerializeWays
                 {
                     w.refs.resize(n_refs);
                     const auto base_ref = serializer.ReadU64();
+                    w.refs[0] = base_ref;
 
                     for(uint32_t i = 1;
                         i < n_refs;
@@ -709,12 +723,29 @@ struct SerializeWays
         {
             const auto ways_start = serializer.CurrentPosition();
             const auto oldP = serializer.SetPosition(index_p + 16);
-            serializer.WriteU32(ways_start);
+            {
+                serializer.WriteU32(ways_start);
+            }
             serializer.SetPosition(oldP);
 
             serializer.WriteU32(ways.size());
+            {
+                uint64_t lastOsmId = 0;
+                for(const auto& w : ways)
+                {
+                    serializer.WriteShortInt(w.osmid - lastOsmId);
+                    lastOsmId = w.osmid;
+                }
+                serializer.WriteU64(0xDEADBEEFCAFEBABE);
+            }
             for(const auto& w : ways)
             {
+                // serialzer.WriteU64(w.osmid);
+
+                if (w.osmid == 3999501 || 3999478 == w.osmid)
+                {
+                    int k = 4;
+                }
                 serializer.WriteShortUint(w.tags.size());
                 for(const auto & p : w.tags)
                 {
@@ -722,29 +753,30 @@ struct SerializeWays
                     serializer.WriteShortUint(p.second);
                 }
 
-                auto base_ref = w.refs[0];
+                uint64_t base_ref;
                 const auto n_refs = w.refs.size();
                 serializer.WriteShortUint(n_refs);
                 if (n_refs)
                 {
+                    base_ref = w.refs[0];
                     serializer.WriteU64(base_ref);
-                }
 
-                for(uint32_t i = 1;
-                    i < n_refs;
-                    i++)
-                {
-                    int64_t diff = w.refs[i] - base_ref;
-                    if (FitsInShortInt(diff))
+                    for(uint32_t i = 1;
+                        i < n_refs;
+                        i++)
                     {
-                        serializer.WriteShortInt(w.refs[i] - base_ref);
-                    }
-                    else
-                    {
-                        serializer.WriteU8(0);
-                        // a 0 can't be a vaild ShortInt in this case.
-                        // therefore the deserializer knows that a raw U64 comes in
-                        serializer.WriteU64(w.refs[i]);
+                        int64_t diff = w.refs[i] - base_ref;
+                        if (FitsInShortInt(diff))
+                        {
+                            serializer.WriteShortInt(w.refs[i] - base_ref);
+                        }
+                        else
+                        {
+                            serializer.WriteU8(0);
+                            // a 0 can't be a vaild ShortInt in this case.
+                            // therefore the deserializer knows that a raw U64 comes in
+                            serializer.WriteU64(w.refs[i]);
+                        }
                     }
                 }
             }
