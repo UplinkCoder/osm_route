@@ -18,8 +18,8 @@ To run it:
 #include <assert.h>
 
 #if (__cplusplus <= 201500)
-#  include "string_view.hpp"
-   using string_view = bpstd::string_view;
+#    include "llvm_string_view.hpp"
+     using string_view = StringView;
 #else
 #  include <string_view>
 #endif
@@ -238,7 +238,7 @@ struct StringTable
     string_view LookupId(uint32_t idx) {
         if (!idx || idx > strings.size())
         {
-            return {(const char*)0, 0};
+            return {(const char*)0, (size_t)0};
         }
         else
         {
