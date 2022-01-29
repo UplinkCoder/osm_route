@@ -431,6 +431,8 @@ struct DeSerializeWays
                     n.lat_m = serializer.ReadF64();
                     n.lon_m = serializer.ReadF64();
                     ReadTags(serializer, &n.tags);
+                    assert(n.tags.size() < 300);
+                    assert(serializer.ReadU32() == 0xf00dcafe);
 
                     // number of children
                     uint32_t n_children = serializer.ReadU8();
@@ -446,6 +448,7 @@ struct DeSerializeWays
                         child.lat_m = serializer.ReadF64();
                         child.lon_m = serializer.ReadF64();
                         ReadTags(serializer, &child.tags);
+                        assert(child.tags.size() < 300);
                     }
                 }
             }
@@ -475,8 +478,13 @@ struct DeSerializeWays
             for(auto& w : ways)
             {
                 // assert(w.osmid != 3999576);
-                ReadTags(serializer, &w.tags);
+                assert(serializer.ReadU32() == 0xbadf00d);
 
+                ReadTags(serializer, &w.tags);
+                printf("Number of tags: %d\n", w.tags.size());
+                uint32_t cafecafe = serializer.ReadU32();
+
+                assert(cafecafe = 0xcafecafe);
                 uint32_t n_refs;
                 serializer.ReadShortUint(&n_refs);
 
@@ -491,11 +499,13 @@ struct DeSerializeWays
                         i++)
                     {
                         int32_t delta;
-                        serializer.ReadShortInt(&delta);
+                        uint8_t bytes_read =
+                            serializer.ReadShortInt(&delta);
 
                         w.refs[i] = base_ref + delta;
                         if (delta == 0)
                         {
+                            assert(bytes_read == 1);
                             w.refs[i] = serializer.ReadU64();
                         }
                     }
@@ -546,6 +556,16 @@ struct SerializeWays
         }
 
         return result;
+    }
+
+    void WriteTags(Serializer& serializer, const short_tags_t& tags)
+    {
+        serializer.WriteShortUint(tags.size());
+        for(const auto & p : tags)
+        {
+            serializer.WriteShortUint(p.first);
+            serializer.WriteShortUint(p.second);
+        }
     }
 
     void node_callback(uint64_t osmid, double lon, double lat, const Tags &tags) {
@@ -682,14 +702,9 @@ struct SerializeWays
                 // writing out the number of relative nod
                 serializer.WriteF64(base_node.lat_m);
                 serializer.WriteF64(base_node.lon_m);
-                serializer.WriteShortUint(base_node.tags.size());
 
-                for(const auto & p : base_node.tags)
-                {
-                    serializer.WriteShortUint(p.first);
-                    serializer.WriteShortUint(p.second);
-                }
-
+                WriteTags(serializer, base_node.tags);
+                serializer.WriteU32(0xf00dcafe);
                 // number of children
                 serializer.WriteU8(b.second);
                 // child list
@@ -704,13 +719,8 @@ struct SerializeWays
 
                     serializer.WriteF64(child.lat_m);
                     serializer.WriteF64(child.lon_m);
-                    serializer.WriteShortUint(child.tags.size());
 
-                    for(const auto & p : child.tags)
-                    {
-                        serializer.WriteShortUint(p.first);
-                        serializer.WriteShortUint(p.second);
-                    }
+                    WriteTags(serializer, child.tags);
                 }
                 idx++;
             }
@@ -742,16 +752,27 @@ struct SerializeWays
             {
                 // serialzer.WriteU64(w.osmid);
 
+
+                if (w.osmid == 3999570)
+                {
+                    assert(w.refs.size() == 39);
+/*
+                    uint64_t read_refs[] =  {20973901, 6242428701, 255188551, 20974621, 20974622, 255188658,
+    3060088348, 3060088346, 8461951810, 6433748214, 6433748210, 1792003375, 6039875349, 20974624, 6018084691, 6018084697, 302072803,
+    6018086124, 303784752, 20974625, 302073059, 3653502621, 6245577096, 287052748, 3653502590, 302070874, 20974626, 259408314,
+    778301141, 303782525, 259408313, 20974628, 302070869, 6245577121, 20974629, 20974630, 778301165, 262766544, 20973895};
+                    for(int i = 0; i < 39; i++)
+                        assert(w.refs[i] == read_refs[i];
+*/
+                    int k = 4;
+                }
                 if (w.osmid == 3999501 || 3999478 == w.osmid)
                 {
                     int k = 4;
                 }
-                serializer.WriteShortUint(w.tags.size());
-                for(const auto & p : w.tags)
-                {
-                    serializer.WriteShortUint(p.first);
-                    serializer.WriteShortUint(p.second);
-                }
+                serializer.WriteU32(0xbadf00d);
+                WriteTags(serializer, w.tags);
+                serializer.WriteU32(0xcafecafe);
 
                 uint64_t base_ref;
                 const auto n_refs = w.refs.size();

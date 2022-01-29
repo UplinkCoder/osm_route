@@ -448,6 +448,7 @@ uint8_t Serializer::WriteShortInt(int32_t value) {
 uint8_t Serializer::ReadShortInt(int32_t* ptr) {
     assert(position_in_buffer <= buffer_used);
 
+    const auto old_position_in_buffer = position_in_buffer;
     if ((buffer_used - position_in_buffer) < 4
         && bytes_in_file - position_in_file > 0)
     {
@@ -482,9 +483,10 @@ uint8_t Serializer::ReadShortInt(int32_t* ptr) {
 
     if (isNegative)
         value = ~value + 1;
+
     *ptr = (int32_t)value;
 
-    return (uint8_t)(buffer - mem);
+    return (uint8_t)(position_in_buffer - old_position_in_buffer);
 }
 
 uint32_t Serializer::WriteRawData(const void* data, uint32_t size) {
@@ -668,6 +670,7 @@ static void test_serializer(void) {
 
         writer.WriteU32(1993 << 13);
 
+        writer.WriteU8(0);
 
         for(int32_t v = -(1 << 3);
             v < (-(1 << 3)) + 128;
@@ -728,6 +731,10 @@ static void test_serializer(void) {
             assert(x[i] == (uint8_t)(i + 1));
         }
         assert(result == 1993 << 13);
+
+        int32_t should_be_zero;
+        reader.ReadShortInt(&should_be_zero);
+        assert(should_be_zero == 0);
 
         for (int32_t v = -(1 << 3);
             v < (-(1 << 3)) + 128;
