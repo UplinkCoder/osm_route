@@ -99,8 +99,8 @@ public:
 #define WRITE_ARRAY_DATA_SIZE(WRITER, ARRAY, SIZE) \
     { \
         char* p = (char*)(ARRAY); \
-        int bytes_left = (SIZE); \
-        int bytes_written = 0; \
+        unsigned bytes_left = (SIZE); \
+        unsigned bytes_written = 0; \
         do \
         { \
             bytes_written = (WRITER).WriteRawData(p, bytes_left); \
@@ -113,8 +113,8 @@ public:
 #define READ_ARRAY_DATA_SIZE(READER, ARRAY, SIZE) \
     { \
         char* p = (char*)(ARRAY); \
-        int bytes_left = (SIZE); \
-        int bytes_read = 0; \
+        unsigned int bytes_left = (SIZE); \
+        unsigned int bytes_read = 0; \
         do \
         { \
             bytes_read = (READER).ReadRawData(p, bytes_left); \
@@ -400,7 +400,7 @@ uint8_t Serializer::WriteShortUint(uint32_t value) {
 
 inline bool FitsInShortInt(int64_t value)
 {
-    return (ABS(value) & 0xffffffff60000000) == 0;
+    return (ABS(value) < (1 << 29));
 }
 
 uint8_t Serializer::WriteShortInt(int32_t value) {
