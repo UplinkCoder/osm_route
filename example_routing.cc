@@ -116,7 +116,7 @@ struct SerializeWays
         {
             auto name_id = tag_names.AddString(it->first);
             auto value_id = tag_values.AddString(it->second);
-            result.emplace(name_id, value_id);
+            result.push_back({name_id, value_id});
         }
 
         return result;

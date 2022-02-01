@@ -6,7 +6,7 @@
 
 using namespace std;
 
-using short_tags_t = unordered_map<uint32_t, uint32_t>;
+using short_tags_t = vector<pair<uint32_t, uint32_t> >;
 
 struct Way
 {

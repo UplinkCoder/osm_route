@@ -15,6 +15,7 @@ struct DeSerializeWays
     StringTable tag_names {
 #        include "prime_names.h"
     };
+
     StringTable tag_values {};
     set<uint32_t> street_name_indicies {};
     std::unordered_map<uint64_t, Node> nodes;
@@ -30,7 +31,7 @@ struct DeSerializeWays
             uint32_t name_index, value_index;
             serializer.ReadShortUint(&name_index);
             serializer.ReadShortUint(&value_index);
-            tags->emplace(name_index, value_index);
+            tags->push_back({name_index, value_index});
         }
     }
 
