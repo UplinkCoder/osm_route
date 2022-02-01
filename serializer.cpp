@@ -99,8 +99,8 @@ public:
 #define WRITE_ARRAY_DATA_SIZE(WRITER, ARRAY, SIZE) \
     { \
         char* p = (char*)(ARRAY); \
-        unsigned bytes_left = (SIZE); \
-        unsigned bytes_written = 0; \
+        unsigned int bytes_left = (SIZE); \
+        unsigned int bytes_written = 0; \
         do \
         { \
             bytes_written = (WRITER).WriteRawData(p, bytes_left); \
@@ -489,6 +489,7 @@ uint8_t Serializer::ReadShortInt(int32_t* ptr) {
 
     return (uint8_t)(position_in_buffer - old_position_in_buffer);
 }
+#undef ABS
 
 uint32_t Serializer::WriteRawData(const void* data, uint32_t size) {
     assert(m_mode == serialize_mode_t::Writing);
@@ -632,7 +633,6 @@ void Serializer::WriteF64(double value) {
 
 #ifdef TEST_MAIN
 
-#undef ABS
 
 static void test_serializer(void) {
     using serialize_mode_t = Serializer::serialize_mode_t;

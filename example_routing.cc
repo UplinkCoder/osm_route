@@ -294,7 +294,9 @@ struct StringTable
         {
             uint32_t n_chars = serializer.ReadU32();
             string_data.resize(n_chars);
+            auto ptr = string_data.data();
 
+/*
             const auto begin = (const char*)string_data.data();
             MAYBE_UNUSED(begin);
             auto ptr = string_data.data();
@@ -306,6 +308,8 @@ struct StringTable
                 size_left -= bytes_read;
             } while(bytes_read);
             assert((uint32_t)(ptr - begin) == string_data.size());
+*/
+            READ_ARRAY_DATA_SIZE(serializer, ptr, n_chars);
         }
         // serializer.EndField();
 
@@ -317,7 +321,6 @@ struct StringTable
             const char* string_ptr = string_data.data();
 
             strings.resize(n_strings);
-
 
             for(StringEntry& e : strings)
             {
