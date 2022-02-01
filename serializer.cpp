@@ -448,12 +448,13 @@ uint8_t Serializer::WriteShortInt(int32_t value) {
 uint8_t Serializer::ReadShortInt(int32_t* ptr) {
     assert(position_in_buffer <= buffer_used);
 
-    const auto old_position_in_buffer = position_in_buffer;
     if ((buffer_used - position_in_buffer) < 4
         && bytes_in_file - position_in_file > 0)
     {
         ReadFlush();
     }
+
+    const auto old_position_in_buffer = position_in_buffer;
 
     assert(buffer_used >= 1);
 
@@ -585,10 +586,7 @@ uint64_t Serializer::ReadU64(void) {
     {
         ReadFlush();
     }
-    if (buffer_used - position_in_buffer < 8)
-    {
-        int k = 12;
-    }
+
     assert(buffer_used - position_in_buffer >= 8);
     uint64_t result =  (*(uint64_t*)(buffer + position_in_buffer));
     position_in_buffer += sizeof(result);

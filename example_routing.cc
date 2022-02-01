@@ -39,6 +39,8 @@ To run it:
 #endif
 
 #define cast(T) (T)
+#define MAYBE_UNUSED(expr) \
+    do { (void)(expr); } while (0)
 
 using namespace CanalTP;
 using namespace std;
@@ -181,6 +183,7 @@ struct StringTable
 
     void assert_sorted(void)
     {
+#ifndef NDEBUG
         uint32_t lastCrc = 0;
         for(auto s : strings)
         {
@@ -189,6 +192,7 @@ struct StringTable
             lastCrc = s.crc32;
         }
         return ;
+#endif
     }
 
     void SortUsageCounts(void) {
@@ -263,6 +267,7 @@ struct StringTable
         {
             serializer.WriteU32(string_data.size());
             const auto begin = (const char*)string_data.data();
+            MAYBE_UNUSED(begin);
             auto ptr = (const char*)string_data.data();
             uint32_t size_left = string_data.size();
             uint32_t bytes_written = 0;
@@ -291,6 +296,7 @@ struct StringTable
             string_data.resize(n_chars);
 
             const auto begin = (const char*)string_data.data();
+            MAYBE_UNUSED(begin);
             auto ptr = string_data.data();
             uint32_t bytes_read = 0;
             uint32_t size_left = n_chars;
@@ -411,8 +417,7 @@ struct DeSerializeWays
         }
 
         {
-            const auto p = serializer.CurrentPosition();
-            assert(p == nodes_off);
+            assert(serializer.CurrentPosition() == nodes_off);
 
             const auto n_nodes = serializer.ReadU32();
             nodes.reserve(n_nodes);
@@ -433,9 +438,6 @@ struct DeSerializeWays
                     n.lat_m = serializer.ReadF64();
                     n.lon_m = serializer.ReadF64();
                     ReadTags(serializer, &n.tags);
-                    assert(n.tags.size() < 300);
-                    assert(serializer.ReadU32() == 0xf00dcafe);
-
                     // number of children
                     uint32_t n_children = serializer.ReadU8();
 
@@ -450,7 +452,6 @@ struct DeSerializeWays
                         child.lat_m = serializer.ReadF64();
                         child.lon_m = serializer.ReadF64();
                         ReadTags(serializer, &child.tags);
-                        assert(child.tags.size() < 300);
                     }
                 }
             }
@@ -467,7 +468,6 @@ struct DeSerializeWays
         clock_t deserialize_ways_begin = clock();
         {
             uint64_t base_way_osmid = 0;
-            uint32_t osmid_crc = INITIAL_CRC32C;
             
             for(auto& w : ways)
             {
@@ -475,26 +475,18 @@ struct DeSerializeWays
                 serializer.ReadShortInt(&osmid_delta);
 
                 w.osmid = base_way_osmid + osmid_delta;
-                osmid_crc = crc32c(osmid_crc, &w.osmid, sizeof(w.osmid)); 
                 base_way_osmid = w.osmid;
             }
-            printf("osmid_crc: %x\n", osmid_crc);
-            assert(serializer.ReadU32() == HTONL(0xCAFEBABE));
 
-            for(int i = 0; i < ways.size(); i++)
+            for(uint32_t i = 0;
+                i < ways.size();
+                i++)
             {
-                // assert(w.osmid != 3999576);
                 auto &w = ways[i];
-                assert(serializer.ReadU32() == HTONL(0xbeefcafe));
-
                 ReadTags(serializer, &w.tags);
-                printf("Number of tags: %d\n", w.tags.size());
-
-                assert(serializer.ReadU32() == HTONL(0xcafecafe));
 
                 uint32_t n_refs;
                 serializer.ReadShortUint(&n_refs);
-                printf("Number of refs: %d\n", n_refs);
 
                 if (n_refs)
                 {
@@ -507,9 +499,10 @@ struct DeSerializeWays
                         i++)
                     {
                         int32_t delta;
-                        uint8_t bytes_read =
-                            serializer.ReadShortInt(&delta);
 
+                        auto bytes_read =
+                            serializer.ReadShortInt(&delta);
+                        MAYBE_UNUSED(bytes_read);
                         w.refs[i] = base_ref + delta;
                         if (delta == 0)
                         {
@@ -539,9 +532,6 @@ struct SerializeWays
     vector<Way> ways;
 
     // everthing below is just serialisation state
-
-    uint64_t max_node_id = 0;
-    uint64_t min_node_id = ~0UL;
 
     uint64_t currentBaseNode;
     uint8_t dependent_nodes[255];
@@ -577,11 +567,6 @@ struct SerializeWays
     }
 
     void node_callback(uint64_t osmid, double lon, double lat, const Tags &tags) {
-        if (osmid > max_node_id)
-            this->max_node_id = osmid;
-        if (osmid < min_node_id)
-            this->min_node_id = osmid;
-
         auto nDiff = ((int64_t)(osmid - currentBaseNode));
         // printf("node_id: %lu .. currentBaseNode: %lu - nDiff: %lu\n", osmid, currentBaseNode, nDiff)
         if (nDiff > 255)
@@ -712,7 +697,6 @@ struct SerializeWays
                 serializer.WriteF64(base_node.lon_m);
 
                 WriteTags(serializer, base_node.tags);
-                serializer.WriteU32(0xf00dcafe);
                 // number of children
                 serializer.WriteU8(b.second);
                 // child list
@@ -751,81 +735,19 @@ struct SerializeWays
             serializer.WriteU32(ways.size());
             {
                 uint64_t lastOsmId = 0;
-                uint32_t osmid_crc = INITIAL_CRC32C;
                 for(const auto& w : ways)
                 {
                     serializer.WriteShortInt(w.osmid - lastOsmId);
-                    osmid_crc = crc32c(osmid_crc, &w.osmid, sizeof(w.osmid));
                     lastOsmId = w.osmid;
                 }
-                printf("osmid crc: %x\n", osmid_crc);
-#ifndef NDEBUG
-                serializer.WriteU32(HTONL(0xCAFEBABE));
-#endif
             }
-            int nx = 0;
+
             for(const auto& w : ways)
-            {
-                // serialzer.WriteU64(w.osmid);
-
-
-                if (w.osmid == 3999570)
-                {
-                    assert(w.refs.size() == 39);
-                    assert(CanFind(w.tags, {16, 7}));
-                    assert(CanFind(w.tags, {9, 17115}));
-                    assert(CanFind(w.tags, {21, 339}));
-                    assert(CanFind(w.tags, {11, 4814}));
-                    assert(CanFind(w.tags, {15, 520}));
-
-                    uint64_t read_refs[] = {
-                        20973901, 6242428701, 255188551, 20974621, 
-                        20974622, 255188658, 3060088348, 3060088346, 
-                        8461951810, 6433748214, 6433748210, 1792003375, 
-                        6039875349, 20974624, 6018084691, 6018084697, 
-                        302072803, 6018086124, 303784752, 20974625, 
-                        302073059, 3653502621, 6245577096, 287052748, 
-                        3653502590, 302070874, 20974626, 259408314, 
-                        778301141, 303782525, 259408313, 20974628, 
-                        302070869, 6245577121, 20974629, 20974630, 
-                        778301165, 262766544, 20973895
-                    };
-                    for(int i = 0; i < 39; i++)
-                    {
-						char buffer1[17];
-						char buffer2[17];
-                        // if (w.refs[i] != read_refs[i])
-                        {
-							printf("[%d] real ref: %s, read ref: %s\n", i,
-								u64tohexstr(w.refs[i], buffer1),
-								u64tohexstr(read_refs[i], buffer2)
-							);
-                            // asm ( ".inst 0xd4200000" );
-                        }
-                    }
-                }
-                
-#ifndef NDEBUG
-                if (nx < 10)
-                {
-                    printf("cp: %x\n", serializer.CurrentPosition());
-                    printf("#tags: %d\n", w.tags.size());
-                }
-                serializer.WriteU32(HTONL(0xbeefcafe));
-#endif                
+            {                
                 WriteTags(serializer, w.tags);
-#ifndef NDEBUG
-                serializer.WriteU32(HTONL(0xcafecafe));
-#endif
+
                 uint64_t base_ref;
                 const auto n_refs = w.refs.size();
-#ifndef NDEBUG
-                if  (nx < 10)
-                {
-                    nx++;
-                    printf("pos_before_n_refs: %x (which should be: %d)\n", serializer.CurrentPosition(), n_refs);
-                }
-#endif
                 serializer.WriteShortUint(n_refs);
                 if (n_refs)
                 {
@@ -837,8 +759,11 @@ struct SerializeWays
                         i++)
                     {
                         int64_t diff = w.refs[i] - base_ref;
-                        if (FitsInShortInt(diff))
+                        if (diff != 0 && FitsInShortInt(diff))
                         {
+                            // if there is a dupllicate node we have to use the long encoding
+                            // as a difference of 0 i reserved for the out of range
+                            // to switch to the long encoding
                             serializer.WriteShortInt(w.refs[i] - base_ref);
                         }
                         else
@@ -938,29 +863,6 @@ int main(int argc, char** argv) {
 
     SerializeWays serializeWays;
     read_osm_pbf(argv[1], serializeWays);
-
-    uint32_t maxTags = 0;
-/*
-    for (auto& nt : serializeWays.nodes)
-    {
-        auto &node = nt.second;
-        if (node.tags.size() > maxTags)
-            maxTags = node.tags.size();
-
-        for(auto it = node.tags.begin();
-            it != node.tags.end();
-            it++)
-        {
-            printf("  %s : %s\n", serializeWays.tag_names[it->first].data(),
-                                  serializeWays.tag_values[it->second].data());
-        }
-        printf("\n");
-    }
-*/
-    printf("max number of tags: %d\n", maxTags);
-    printf("max number of tag-keys: %d\n", (int)serializeWays.tag_names.strings.size());
-    printf("max number of tag-values: %d\n", (int)serializeWays.tag_values.strings.size());
-    printf("max id: %lu ... min id: %lu\n", serializeWays.max_node_id, serializeWays.min_node_id);
 
     serializeWays.tag_values.SortUsageCounts();
     serializeWays.tag_names.SortUsageCounts();
