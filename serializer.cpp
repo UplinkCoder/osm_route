@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdlib.h>
 
+#pragma once
+
 #ifdef TEST_MAIN
 #  define HAD_TEST_MAIN_SERIALIZER
 #  undef TEST_MAIN
@@ -212,7 +214,7 @@ uint32_t Serializer::WriteFlush (void) {
 
 Serializer::Serializer(const char* filename, serialize_mode_t mode) :
     m_filename(filename), m_mode(mode), crc(~0)  {
-    fd = fopen(filename, m_mode == serialize_mode_t::Writing ? "r+w+b" : "rb");
+    fd = fopen(filename, m_mode == serialize_mode_t::Writing ? "w+b" : "rb");
 
     if (!fd)
     {

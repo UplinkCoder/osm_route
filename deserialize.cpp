@@ -1,8 +1,13 @@
 #include <set>
 #include <vector>
+#include <map>
 #include <unordered_map>
 #include <utility>
 #include "string_table.cpp"
+#include "ways.h"
+
+#define MAYBE_UNUSED(expr) \
+    do { (void)(expr); } while (0)
 
 struct DeSerializeWays
 {
@@ -172,3 +177,5 @@ struct DeSerializeWays
 
     }
 } ;
+
+#undef MAYBE_UNUSED

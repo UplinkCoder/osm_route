@@ -1,7 +1,8 @@
 #include <vector>
 #include <utility>
-
+#include "stdlib.h"
 #include "crc32.c"
+#include "serializer.cpp"
 
 #if (__cplusplus <= 201500)
 #    include "llvm_string_view.hpp"
@@ -9,6 +10,9 @@
 #else
 #  include <string_view>
 #endif
+
+#define SORT_VEC(VEC) \
+    VEC.data(), VEC.size(), sizeof(decltype(VEC)::value_type)
 
 using namespace std;
 
@@ -34,143 +38,22 @@ struct StringTable
 
     uint32_t AddString(const string_view & str);
 
-    /// Returns 0 if not found or the index of the string_entry + 1
-    uint32_t LookupCString(const char* str) {
-        return LookupString(string_view {str, strlen(str)});
-    }
+    /// Returns 0 if not found or the index of the string_entry + 1 if found
+    uint32_t LookupCString(const char* str);
 
-    uint32_t LookupString(const string_view& str) {
-        const char* str_data = str.data();
-        const auto str_size = str.size();
-        const uint32_t crc_input =
-            FINALIZE_CRC32C(crc32c(INITIAL_CRC32C, str.data(), str.size()));
+    /// Returns 0 if not found or the index of the string_entry + 1 if found
+    uint32_t LookupString(const string_view& str);
 
-        uint idx = 0;
-        // using entry_t = decltype(strings)::value_type;
-        for (auto it = crc32_to_indecies.find(crc_input);
-             it != crc32_to_indecies.end();
-             it++
-        ) {
-            const auto s = strings[it->second - 1];
-            if (str_size == s.length
-                && 0 == strncmp(&string_data[s.offset], str_data, str_size))
-            {
-                idx = (it->second);
-                break;
-            }
-        }
+    string_view LookupId(uint32_t idx);
 
-        return idx;
-    }
+    string_view operator[] (uint32_t idx);
 
-    string_view LookupId(uint32_t idx) {
-        if (!idx || idx > strings.size())
-        {
-            return {(const char*)0, (size_t)0};
-        }
-        else
-        {
-            const auto entry = strings[idx - 1];
-            return string_view {&string_data[entry.offset], entry.length};
-        }
-    }
+    /// Returns 0 if not found or the index of the string_entry + 1 if found
+    uint32_t operator[] (const string_view& str);
 
-    string_view operator[] (uint32_t idx) {
-        return LookupId(idx);
-    }
+    void Serialize (Serializer& serializer);
 
-    uint32_t operator[] (const string_view& str) {
-        return LookupString(str);
-    }
-
-    void Serialize (Serializer& serializer) {
-        // serialize string data.
-        // serializer.BeginField("vector<char>", "string_data");
-        {
-            serializer.WriteU32(string_data.size());
-            const auto begin = (const char*)string_data.data();
-            MAYBE_UNUSED(begin);
-            auto ptr = (const char*)string_data.data();
-            uint32_t size_left = string_data.size();
-            uint32_t bytes_written = 0;
-
-            do {
-                bytes_written = serializer.WriteRawData(ptr, size_left);
-                ptr += bytes_written;
-                size_left -= bytes_written;
-            } while(bytes_written);
-            assert((uint32_t)(ptr - begin) == string_data.size());
-        }
-        // serializer.EndField();
-
-        // we only need to store the number of strings as we can
-        // reproduce the string entires by reading in the null
-        // terminated strings in order.
-        serializer.WriteU32(strings.size());
-    }
-
-    void DeSerialize (Serializer& serializer) {
-        // serialize string data.
-
-        // serializer.BeginField("vector<char>", "string_data");
-        {
-            uint32_t n_chars = serializer.ReadU32();
-            string_data.resize(n_chars);
-            auto ptr = string_data.data();
-
-/*
-            const auto begin = (const char*)string_data.data();
-            MAYBE_UNUSED(begin);
-            uint32_t bytes_read = 0;
-            uint32_t size_left = n_chars;
-            do {
-                bytes_read = serializer.ReadRawData(ptr, size_left);
-                ptr += bytes_read;
-                size_left -= bytes_read;
-            } while(bytes_read);
-            assert((uint32_t)(ptr - begin) == string_data.size());
-*/
-            READ_ARRAY_DATA_SIZE(serializer, ptr, n_chars);
-        }
-        // serializer.EndField();
-
-        // let's recreate the strings vector
-        {
-            auto n_strings = serializer.ReadU32();
-
-            const char * const string_data_begin = string_data.data();
-            const char* string_ptr = string_data.data();
-
-            strings.resize(n_strings);
-
-            for(StringEntry& e : strings)
-            {
-                const char* const word_begin = string_ptr;
-                e.offset = (uint32_t)(word_begin - string_data_begin);
-
-                uint32_t length = strlen(word_begin);
-                assert(length);
-
-                e.length = length;
-                e.crc32 = FINALIZE_CRC32C(
-                    crc32c(INITIAL_CRC32C, string_ptr, length)
-                );
-                string_ptr += length;
-                string_ptr++;
-            }
-            assert((uint32_t)(string_ptr - string_data_begin) == string_data.size());
-        }
-
-        {
-            // now recreate the map
-            // crc32_to_indecies
-            int idx = 1;
-            for(auto& e : strings)
-            {
-                crc32_to_indecies.emplace(e.crc32, idx++);
-            }
-        }
-    }
+    void DeSerialize (Serializer& serializer);
 
     void SortUsageCounts(void) {
         qsort(SORT_VEC(usage_counts),
@@ -186,14 +69,14 @@ struct StringTable
 };
 
 
-StringTable::StringTable(vector<const char*> primer = {}) : string_data(), strings(), crc32_to_indecies() {
+StringTable::StringTable (vector<const char*> primer = {}) : string_data(), strings(), crc32_to_indecies() {
     for(auto &e : primer)
     {
         AddString(string_view {e, strlen(e)} );
     }
 }
 
-uint32_t StringTable::AddString(const string_view & str) {
+uint32_t StringTable::AddString (const string_view & str) {
     // cerr << "called " << __FUNCTION__ << " (" << str << ")" << endl;
 
     const auto crc =
@@ -230,3 +113,122 @@ uint32_t StringTable::AddString(const string_view & str) {
 }
 
 
+uint32_t StringTable::LookupCString (const char* str) {
+    return LookupString(string_view {str, strlen(str)});
+}
+
+uint32_t StringTable::LookupString (const string_view& str) {
+    const char* str_data = str.data();
+    const auto str_size = str.size();
+    const uint32_t crc_input =
+        FINALIZE_CRC32C(crc32c(INITIAL_CRC32C, str.data(), str.size()));
+
+    uint idx = 0;
+    // using entry_t = decltype(strings)::value_type;
+    for (auto it = crc32_to_indecies.find(crc_input);
+         it != crc32_to_indecies.end();
+         it++
+    ) {
+        const auto s = strings[it->second - 1];
+        if (str_size == s.length
+            && 0 == strncmp(&string_data[s.offset], str_data, str_size))
+        {
+            idx = (it->second);
+            break;
+        }
+    }
+
+    return idx;
+}
+
+string_view StringTable::LookupId (uint32_t idx) {
+    if (!idx || idx > strings.size())
+    {
+        return {(const char*)0, (size_t)0};
+    }
+    else
+    {
+        const auto entry = strings[idx - 1];
+        return string_view {&string_data[entry.offset], entry.length};
+    }
+}
+
+string_view StringTable::operator[] (uint32_t idx) {
+    return LookupId(idx);
+}
+
+uint32_t StringTable::operator[] (const string_view& str) {
+    return LookupString(str);
+}
+
+void StringTable::Serialize (Serializer& serializer) {
+    // serialize string data.
+    // serializer.BeginField("vector<char>", "string_data");
+    {
+        const uint32_t n_chars = string_data.size();
+
+        serializer.WriteU32(n_chars);
+        auto ptr = (const char*)string_data.data();
+        WRITE_ARRAY_DATA_SIZE(serializer, ptr, n_chars);
+    }
+
+    // serializer.EndField();
+
+    // we only need to store the number of strings as we can
+    // reproduce the string entires by reading in the null
+    // terminated strings in order.
+    serializer.WriteU32(strings.size());
+}
+
+void StringTable::DeSerialize (Serializer& serializer) {
+    // serialize string data.
+
+    // serializer.BeginField("vector<char>", "string_data");
+    {
+        uint32_t n_chars = serializer.ReadU32();
+        string_data.resize(n_chars);
+        auto ptr = string_data.data();
+
+        READ_ARRAY_DATA_SIZE(serializer, ptr, n_chars);
+    }
+    // serializer.EndField();
+
+    // let's recreate the strings vector
+    {
+        auto n_strings = serializer.ReadU32();
+
+        const char * const string_data_begin = string_data.data();
+        const char* string_ptr = string_data.data();
+
+        strings.resize(n_strings);
+
+        for(StringEntry& e : strings)
+        {
+            const char* const word_begin = string_ptr;
+            e.offset = (uint32_t)(word_begin - string_data_begin);
+
+            uint32_t length = strlen(word_begin);
+            assert(length);
+
+            e.length = length;
+            e.crc32 = FINALIZE_CRC32C(
+                crc32c(INITIAL_CRC32C, string_ptr, length)
+            );
+            string_ptr += length;
+            string_ptr++;
+        }
+        assert((uint32_t)(string_ptr - string_data_begin) == string_data.size());
+    }
+
+    {
+        // now recreate the map
+        // crc32_to_indecies
+        int idx = 1;
+        for(auto& e : strings)
+        {
+            crc32_to_indecies.emplace(e.crc32, idx++);
+        }
+    }
+}
+
+#undef SORT_VEC

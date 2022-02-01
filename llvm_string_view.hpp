@@ -2,6 +2,8 @@
 #include <cstring>
 #include <string>
 
+#pragma once
+
 class StringView {
    const char *First;
    const char *Last;
