@@ -61,8 +61,10 @@ struct DeSerializeWays
                 tag_values.DeSerialize(serializer);
             }
             clock_t deserialize_tags_end = clock();
+#if 0
             printf("deserialisation of tags took %f milliseconds\n",
                 ((deserialize_tags_end - deserialize_tags_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
+#endif
         }
 
 
@@ -82,8 +84,10 @@ struct DeSerializeWays
                 // printf("Read %d street_name_indicies\n", street_name_indicies.size());
              }
             clock_t deserialize_street_names_end = clock();
+#if 0
             printf("deserialisation of street names took %f milliseconds\n",
                 ((deserialize_street_names_end - deserialize_street_names_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
+#endif
         }
 
         {
@@ -95,7 +99,6 @@ struct DeSerializeWays
             clock_t deserialize_nodes_begin = clock();
             {
                 const auto n_baseNodes = serializer.ReadU32();
-                printf("n_nodes: %d .. n_baseNodes: %d\n", n_nodes, n_baseNodes);
                 {
                     uint32_t idx = 0;
 
@@ -129,9 +132,10 @@ struct DeSerializeWays
                 }
             }
             clock_t deserialize_nodes_end = clock();
-
+#if 0
             printf("deserialisation of nodes took %f milliseconds\n",
                 ((deserialize_nodes_end - deserialize_nodes_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
+#endif
         }
         assert(ways_off == serializer.CurrentPosition());
 
@@ -187,8 +191,10 @@ struct DeSerializeWays
             }
         }
         clock_t deserialize_ways_end = clock();
+#if 0
         printf("deserialisation of ways took %f milliseconds\n",
             ((deserialize_ways_end - deserialize_ways_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
+#endif
 
     }
 } ;
