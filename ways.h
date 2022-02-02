@@ -86,7 +86,7 @@ struct Way
 
 // We keep every node and the how many times it is used in order to detect crossings
 struct Node {
-    Node() : osmid(0), uses(0), lon_m(0), lat_m(0), tags({}) {}
+    Node() = default;
 
     Node(uint64_t osmid_, double lon, double lat, short_tags_t tags_) :
         osmid(osmid_), uses(0), lon_m(lon), lat_m(lat), tags(tags_) {}

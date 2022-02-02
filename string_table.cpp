@@ -26,6 +26,7 @@ struct StringEntry
 
 struct StringTable
 {
+    StringTable() = default;
     StringTable(vector<const char*> primer);
     // private:
 
@@ -70,7 +71,7 @@ struct StringTable
 };
 
 
-StringTable::StringTable (vector<const char*> primer = {}) : string_data(), strings(), crc32_to_indecies() {
+StringTable::StringTable (vector<const char*> primer) : string_data(), strings(), crc32_to_indecies() {
     for(auto &e : primer)
     {
         AddString(string_view {e, strlen(e)} );
