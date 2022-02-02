@@ -17,7 +17,7 @@ struct DeSerializeWays
 
     StringTable tag_values {};
     qSpan<uint32_t> street_name_indicies {};
-    std::unordered_map<uint64_t, Node> nodes;
+    qSpan<Node> nodes;
     qSpan<Way> ways;
 
     void ReadTags(Serializer& serializer, short_tags_t* tags)
@@ -83,38 +83,42 @@ struct DeSerializeWays
             assert(serializer.CurrentPosition() == nodes_off);
 
             const auto n_nodes = serializer.ReadU32();
-            nodes.reserve(n_nodes);
+            nodes.resize(n_nodes);
 
             clock_t deserialize_nodes_begin = clock();
             {
                 const auto n_baseNodes = serializer.ReadU32();
                 printf("n_nodes: %d .. n_baseNodes: %d\n", n_nodes, n_baseNodes);
-                for(uint32_t i = 0;
-                    i < n_baseNodes;
-                    i++)
                 {
-                    const auto base_id = serializer.ReadU64();
-                    auto& n = nodes[base_id];
-
-                    n.osmid = base_id;
-                    // writing out the number of relative nod
-                    n.lat_m = serializer.ReadF64();
-                    n.lon_m = serializer.ReadF64();
-                    ReadTags(serializer, &n.tags);
-                    // number of children
-                    uint32_t n_children = serializer.ReadU8();
+                    uint32_t idx = 0;
 
                     for(uint32_t i = 0;
-                        i < n_children;
+                        i < n_baseNodes;
                         i++)
                     {
-                        const auto id_offset = serializer.ReadU8();
-                        // id offset from base no
-                        auto & child = nodes[base_id + id_offset];
+                        const auto base_id = serializer.ReadU64();
+                        auto& n = nodes[idx++];
 
-                        child.lat_m = serializer.ReadF64();
-                        child.lon_m = serializer.ReadF64();
-                        ReadTags(serializer, &child.tags);
+                        n.osmid = base_id;
+                        // writing out the number of relative nod
+                        n.lat_m = serializer.ReadF64();
+                        n.lon_m = serializer.ReadF64();
+                        ReadTags(serializer, &n.tags);
+                        // number of children
+                        uint32_t n_children = serializer.ReadU8();
+
+                        for(uint32_t i = 0;
+                            i < n_children;
+                            i++)
+                        {
+                            const auto id_offset = serializer.ReadU8();
+                            // id offset from base no
+                            auto & child = nodes[idx++];
+
+                            child.lat_m = serializer.ReadF64();
+                            child.lon_m = serializer.ReadF64();
+                            ReadTags(serializer, &child.tags);
+                        }
                     }
                 }
             }
