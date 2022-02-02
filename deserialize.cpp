@@ -111,10 +111,9 @@ struct DeSerializeWays
                             i < n_children;
                             i++)
                         {
-                            const auto id_offset = serializer.ReadU8();
-                            // id offset from base no
                             auto & child = nodes[idx++];
 
+                            child.osmid = base_id + serializer.ReadU8();
                             child.lat_m = serializer.ReadF64();
                             child.lon_m = serializer.ReadF64();
                             ReadTags(serializer, &child.tags);

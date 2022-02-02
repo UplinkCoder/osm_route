@@ -64,7 +64,7 @@ struct qSpan
 
     void resize(size_t n)
     {
-        (*(T**)&begin_) = (T*)realloc((T*)begin_, n * sizeof(T));
+        begin_ = (T*)realloc((T*)begin_, n * sizeof(T));
         end_ = begin_ + n;
         managed = true;
     }
