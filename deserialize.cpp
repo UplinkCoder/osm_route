@@ -1,10 +1,9 @@
-#include <set>
-#include <vector>
-#include <map>
 #include <unordered_map>
 #include <utility>
 #include "string_table.cpp"
 #include "ways.h"
+
+#undef MAYBE_UNUSED
 
 #define MAYBE_UNUSED(expr) \
     do { (void)(expr); } while (0)
@@ -17,31 +16,36 @@ struct DeSerializeWays
     };
 
     StringTable tag_values {};
-    set<uint32_t> street_name_indicies {};
+    qSpan<uint32_t> street_name_indicies {};
     std::unordered_map<uint64_t, Node> nodes;
-    vector<Way> ways;
+    qSpan<Way> ways;
 
     void ReadTags(Serializer& serializer, short_tags_t* tags)
     {
         uint32_t n_tags;
         serializer.ReadShortUint(&n_tags);
-        tags->reserve(n_tags);
+        tags->resize(n_tags);
         for(uint32_t itag = 0; itag < n_tags; itag++)
         {
             uint32_t name_index, value_index;
             serializer.ReadShortUint(&name_index);
             serializer.ReadShortUint(&value_index);
-            tags->push_back({name_index, value_index});
+            (*tags)[itag] = {name_index, value_index};
         }
     }
 
     void DeSerialize (Serializer& serializer)
     {
         const auto tag_names_off = serializer.ReadU32(); // beginning tag names
+        MAYBE_UNUSED(tag_names_off);
         const auto tag_values_off = serializer.ReadU32(); // beginning tag values
+        MAYBE_UNUSED(tag_values_off);
         const auto street_names_off = serializer.ReadU32(); // beginning street_names
+        MAYBE_UNUSED(street_names_off);
         const auto nodes_off = serializer.ReadU32(); // beginning nodes
+        MAYBE_UNUSED(nodes_off);
         const auto ways_off = serializer.ReadU32(); // beginning ways
+        MAYBE_UNUSED(ways_off);
 
         {
             clock_t deserialize_tags_begin = clock();
@@ -59,13 +63,13 @@ struct DeSerializeWays
             clock_t deserialize_street_names_begin = clock();
             {
                 uint32_t n_street_names = serializer.ReadU32();
+                street_name_indicies.resize(n_street_names);
+
                 for (uint32_t i = 0;
                     i < n_street_names;
                     i++)
                 {
-                    uint32_t value;
-                    serializer.ReadShortUint(&value);
-                    street_name_indicies.insert(value);
+                    serializer.ReadShortUint(&street_name_indicies[i]);
                     // printf("street_name: %s\n", tag_values[value].data());
                 }
                 // printf("Read %d street_name_indicies\n", street_name_indicies.size());

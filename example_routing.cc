@@ -109,14 +109,18 @@ struct SerializeWays
 
     short_tags_t ShortenTags(const Tags& tags) {
         short_tags_t result = {};
-
-        for(auto it = tags.begin();
-            it != tags.end();
-            it++)
         {
-            auto name_id = tag_names.AddString(it->first);
-            auto value_id = tag_values.AddString(it->second);
-            result.push_back({name_id, value_id});
+            uint32_t idx = 0;
+            result.resize(tags.size());
+
+            for(auto it = tags.begin();
+                it != tags.end();
+                it++)
+            {
+                auto name_id = tag_names.AddString(it->first);
+                auto value_id = tag_values.AddString(it->second);
+                result[idx++] = {name_id, value_id};
+            }
         }
 
         return result;
@@ -295,21 +299,30 @@ struct SerializeWays
             }
             serializer.SetPosition(oldP);
         }
-        
+
         clock_t serialize_ways_begin = clock();
-        {        
-            serializer.WriteU32(ways.size());
+        {
+            const auto n_ways = ways.size();
+            serializer.WriteU32(n_ways);
             {
                 uint64_t lastOsmId = 0;
-                for(const auto& w : ways)
+                for(uint32_t widx = 0;
+                    widx < n_ways;
+                    widx++)
                 {
+                    const auto& w = ways[widx];
+
                     serializer.WriteShortInt(w.osmid - lastOsmId);
                     lastOsmId = w.osmid;
                 }
             }
 
-            for(const auto& w : ways)
-            {                
+            for(uint32_t widx = 0;
+                widx < n_ways;
+                widx++)
+            {
+                const auto& w = ways[widx];
+
                 WriteTags(serializer, w.tags);
 
                 uint64_t base_ref;

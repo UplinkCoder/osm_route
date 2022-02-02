@@ -1,20 +1,86 @@
 #pragma once
 
-#include <unordered_map>
+#include <stdint.h>
 #include <vector>
 #include <stdio.h>
+#include <assert.h>
 
 using namespace std;
 
-using short_tags_t = vector<pair<uint32_t, uint32_t> >;
+struct short_tag
+{
+    uint32_t first;
+    uint32_t second;
+};
+
+template <typename T>
+struct qSpan
+{
+    using value_type = T;
+
+    const T* begin_;
+    const T* end_;
+    bool managed = false;
+
+    constexpr const size_t size() const {
+        return end_ - begin_;
+    }
+
+    qSpan() = default;
+
+    constexpr qSpan(const T* begin, const T* end) :
+        begin_(begin), end_(end) {}
+
+    constexpr qSpan(const vector<T>& vec) :
+        begin_(vec.data()), end_(begin_ + vec.size()) {}
+
+    constexpr qSpan(const T* begin, const size_t size) :
+        begin_(begin), end_(begin + size) {}
+
+    ~qSpan() {
+        if (managed && begin_) free((void*)begin_);
+    }
+
+    T *begin() const {
+        return (T*)begin_;
+    }
+
+    const T *end() const {
+        return end_;
+    }
+
+    T& operator[] (uint32_t index) {
+        assert(index < (uint32_t)(end_ - begin_));
+        return ((T*)begin_)[index];
+    }
+
+    constexpr const T& operator[] (uint32_t index) const {
+        return begin_[index];
+    }
+
+    constexpr const T& back(void) {
+        return end_[-1];
+    }
+
+    void resize(size_t n)
+    {
+        (*(T**)&begin_) = (T*)realloc((T*)begin_, n * sizeof(T));
+        end_ = begin_ + n;
+        managed = true;
+    }
+};
+
+using short_tags_t = qSpan<short_tag>;
 
 struct Way
 {
-    Way(uint64_t osmid_ = {}, std::vector<uint64_t> refs_ = {}, short_tags_t tags_ = {}) :
+    Way(uint64_t osmid_ = {}, qSpan<uint64_t> refs_ = {}, short_tags_t tags_ = {}) :
         osmid(osmid_), refs(refs_), tags(tags_) {}
 
     uint64_t osmid;
-    std::vector<uint64_t> refs;
+
+    qSpan<uint64_t> refs;
+
     short_tags_t tags;
 };
 

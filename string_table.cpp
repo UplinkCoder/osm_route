@@ -1,4 +1,5 @@
 #include <vector>
+#include <map>
 #include <utility>
 #include "stdlib.h"
 #include "crc32.c"

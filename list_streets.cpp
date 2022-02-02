@@ -21,7 +21,7 @@ using namespace std;
 
 // lets to a crappy trie
 vector<string_view> street_name_trie[27] {};
-vector<pair<string_view, uint32_t>> street_names;
+qSpan<pair<string_view, uint32_t>> street_names;
 
 static const auto SPECIAL_CHAR_IDX = 26;
 
@@ -43,14 +43,15 @@ MAIN
         ws.street_name_indicies.size();
     
     printf("found %u street names\n", n_street_names);
-    
-    street_names.resize(n_street_names);
     {
- 
+        street_names.resize(n_street_names);
+    }
+    {
+        uint32_t idx = 0;
         for(const auto &s_idx : ws.street_name_indicies)
         {
             const auto & str = ws.tag_values[s_idx];
-            street_names.push_back(make_pair(str, s_idx));
+            street_names[idx++] = (make_pair(str, s_idx));
         }
         
         
