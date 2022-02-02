@@ -37,15 +37,15 @@ struct qSpan
     constexpr qSpan(const T* begin, const size_t size) :
         begin_(begin), end_(begin + size) {}
 
-    ~qSpan() {
-        if (managed && begin_) free((void*)begin_);
+    void FreeMemory(void) {
+        if (managed && begin) free(begin);
     }
 
-    T *begin() const {
+    T* begin(void) const {
         return (T*)begin_;
     }
 
-    T *end() const {
+    T* end(void) const {
         return (T*)end_;
     }
 
