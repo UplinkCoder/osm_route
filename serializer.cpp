@@ -159,7 +159,7 @@ uint32_t Serializer::SetPosition(uint32_t p) {
     return oldP;
 }
 
-uint32_t Serializer::ReadFlush(void) {
+uint32_t Serializer::ReadFlush (void) {
     assert(buffer_used >= position_in_buffer); // general invariant
 
     const uint64_t bytes_available = bytes_in_file - position_in_file;

@@ -100,15 +100,8 @@ struct Pool
         void * memory = nullptr;
         auto aligned_size = Align16(requested_size);
 
-
-        const auto opr = pi.n_allocation_records;
-        const auto ope = pi.n_allocated_extra_pages;
-
-        if (pi.n_allocation_records == 734
-            && pi.n_allocated_extra_pages == 24060)
-        {
-            int k = 22;
-        }
+        // const auto opr = pi.n_allocation_records;
+        // const auto ope = pi.n_allocated_extra_pages;
 
         PoolAllocationRecord* result =
             ((pi.n_allocation_records
