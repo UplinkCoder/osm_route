@@ -19,22 +19,25 @@ struct DeSerializeWays
     qSpan<uint32_t> street_name_indicies {};
     qSpan<Node> nodes;
     qSpan<Way> ways;
+    Pool *pool;
 
     void ReadTags(Serializer& serializer, short_tags_t* tags)
     {
         uint32_t n_tags;
         serializer.ReadShortUint(&n_tags);
-        tags->resize(n_tags);
+        tags->AllocFromPool(n_tags, pool);
         for(uint32_t itag = 0; itag < n_tags; itag++)
         {
             uint32_t name_index, value_index;
             serializer.ReadShortUint(&name_index);
             serializer.ReadShortUint(&value_index);
+            auto tags_begin = tags->begin();
+            auto tag_addr = &(*tags)[itag];
             (*tags)[itag] = {name_index, value_index};
         }
     }
 
-    void DeSerialize (Serializer& serializer)
+    void DeSerialize (Serializer& serializer, Pool* pool)
     {
         const auto tag_names_off = serializer.ReadU32(); // beginning tag names
         MAYBE_UNUSED(tag_names_off);
@@ -46,6 +49,10 @@ struct DeSerializeWays
         MAYBE_UNUSED(nodes_off);
         const auto ways_off = serializer.ReadU32(); // beginning ways
         MAYBE_UNUSED(ways_off);
+
+        assert(pool != nullptr);
+
+        this->pool = pool;
 
         {
             clock_t deserialize_tags_begin = clock();
@@ -63,7 +70,7 @@ struct DeSerializeWays
             clock_t deserialize_street_names_begin = clock();
             {
                 uint32_t n_street_names = serializer.ReadU32();
-                street_name_indicies.resize(n_street_names);
+                street_name_indicies.AllocFromPool(n_street_names, pool);
 
                 for (uint32_t i = 0;
                     i < n_street_names;
@@ -83,7 +90,7 @@ struct DeSerializeWays
             assert(serializer.CurrentPosition() == nodes_off);
 
             const auto n_nodes = serializer.ReadU32();
-            nodes.resize(n_nodes);
+            nodes.AllocFromPool(n_nodes, pool);
 
             clock_t deserialize_nodes_begin = clock();
             {
@@ -129,7 +136,7 @@ struct DeSerializeWays
         assert(ways_off == serializer.CurrentPosition());
 
         const auto n_ways = serializer.ReadU32();
-        ways.resize(n_ways);
+        ways.AllocFromPool(n_ways, pool);
 
         clock_t deserialize_ways_begin = clock();
         {
@@ -156,7 +163,7 @@ struct DeSerializeWays
 
                 if (n_refs)
                 {
-                    w.refs.resize(n_refs);
+                    w.refs.AllocFromPool(n_refs, pool);
                     const auto base_ref = serializer.ReadU64();
                     w.refs[0] = base_ref;
 
