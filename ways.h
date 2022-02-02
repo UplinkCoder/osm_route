@@ -45,8 +45,8 @@ struct qSpan
         return (T*)begin_;
     }
 
-    const T *end() const {
-        return end_;
+    T *end() const {
+        return (T*)end_;
     }
 
     T& operator[] (uint32_t index) {
