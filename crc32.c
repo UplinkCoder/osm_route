@@ -136,6 +136,7 @@ inline static uint32_t* makeTable(uint32_t* result, uint8_t initValue)
     return result;
 }
 */
+#undef MIN
 
 #define MIN(A, B) \
     ((A) < (B) ? (A) : (B))
@@ -173,6 +174,8 @@ Lswitch:
     return crc;
 
 }
+
+#undef MIN
 
 #endif
 

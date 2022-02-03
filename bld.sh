@@ -4,4 +4,3 @@ g++ example_routing.o -oapp -losmpbf -lz -lprotobuf-lite
 
 g++ list_streets.cpp -std=c++17 -Wall -pedantic  -ffast-math -Ofast -march=native -mtune=native -g1 -c -DNDEBUG
 g++ list_streets.o -olist_streets
-
