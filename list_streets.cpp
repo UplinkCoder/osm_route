@@ -19,6 +19,12 @@
 
 using namespace std;
 
+static const string_view commands[] {
+    ":tag_name",
+    ":tag_value",
+    ":is_street"
+};
+
 // lets to a crappy trie
 qSpan<string_view> street_name_trie[27] {};
 qSpan<pair<string_view, uint32_t> > street_names;
@@ -32,8 +38,35 @@ static const auto SPECIAL_CHAR_IDX = 26;
 void complete (const char * line, linenoiseCompletions * completions)
 {
     const auto len = strlen(line);
+    if (line[0] == ':')
+    {
+        char completion_buffer[128];
+        for(const auto& c : commands)
+        {
+            if (strcasecmp(line, c.data()))
+            {
+                int i = 0;
+                for(const char *cc = c.data(); *cc; i++, cc++)
+                {
+                    completion_buffer[i] = *cc;
+                }
+                completion_buffer[c.size()] = ' ';
+                completion_buffer[c.size() + 1] = '\0';
+                if (len < c.size())
+                {
+                    // only add the command completion if we haven't seen the whole command
+                    // sprintf(completion_buffer + i + 1, " length: %d", len);
+                    linenoiseAddCompletion(completions, completion_buffer);
+                }
+                else
+                {
+                    
+                }
+            }
+        }
+    }
 
-    if (len)
+    else if (len)
     {
         auto c = LOWERCASE(line[0]);
         if (c >= 'a' &&  c <= 'z')
@@ -50,7 +83,7 @@ void complete (const char * line, linenoiseCompletions * completions)
                 if (0 == strncasecmp(str.data(), line, len))
                 {
                     linenoiseAddCompletion(completions, str.data());
-                    if (n_completions++ == 30)
+                    if (n_completions++ == 100)
                         break;
                 }
             }
@@ -142,8 +175,40 @@ MAIN
         linenoiseSetCompletionCallback(&complete);
         while( (input = linenoise("> ")) != NULL )
         {
-            if (0 == strcmp(input, "q"))
+            const auto is_cmd = ((input[0] == ':') ? 1 : 0); 
+            const auto input_length = strlen(input + is_cmd);
+            const auto input_crc = 
+                crc32c(INITIAL_CRC32C, input + is_cmd, input_length);
+ 
+            if (0 == strcmp(input + is_cmd, "q"))
                 return 0;
+
+            if (is_cmd)
+            {
+                #define CMD(S, ... ) \
+                        if(0 == strncmp(#S, input + 1, sizeof(#S) - 1)) \
+                        { \
+                            const int32_t arg_len = input_length - sizeof(#S); \
+                            const char* arg = ((arg_len > 0) ? input + 1 + sizeof(#S) : 0); \
+                            const auto crc_arg = ((arg_len > 0) ? crc32c(INITIAL_CRC32C, arg, arg_len) : 0); \
+                            __VA_ARGS__ \
+                        }
+                    
+                // this is a command
+                CMD(tag_name,{
+                    printf("name arg_len: %d -- '%s'\n", arg_len, arg);
+                    const auto tag_idx = ws.tag_names.LookupString(arg, arg_len, crc_arg);
+                    if (tag_idx)
+                    {
+                        printf("tag index for '%s' is: '%u'\n", arg, tag_idx);
+                    }
+                })
+            }
+            #undef CMD
+            else
+            {
+                printf("crc32c of '%s' is: %x\n", input, input_crc);
+            }
             linenoiseFree(input); /* Or free(line) for libc malloc. */
         }
     }

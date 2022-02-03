@@ -45,6 +45,9 @@ struct StringTable
 
     /// Returns 0 if not found or the index of the string_entry + 1 if found
     uint32_t LookupString(const string_view& str);
+    
+    /// Returns 0 if not found or the index fo the string_entry + 1 if found
+    uint32_t LookupString (const char* str_data, uint32_t str_size, uint32_t input_crc);
 
     string_view LookupId(uint32_t idx);
 
@@ -122,9 +125,14 @@ uint32_t StringTable::LookupCString (const char* str) {
 uint32_t StringTable::LookupString (const string_view& str) {
     const char* str_data = str.data();
     const auto str_size = str.size();
-    const uint32_t crc_input =
-        FINALIZE_CRC32C(crc32c(INITIAL_CRC32C, str.data(), str.size()));
 
+    const uint32_t crc_input =
+        FINALIZE_CRC32C(crc32c(INITIAL_CRC32C, str_data, str_size));
+        
+    return LookupString(str_data, str_size, crc_input);
+}
+
+uint32_t StringTable::LookupString (const char* str_data, uint32_t str_size, uint32_t crc_input) {
     uint idx = 0;
     // using entry_t = decltype(strings)::value_type;
     for (auto it = crc32_to_indecies.find(crc_input);

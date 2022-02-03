@@ -3,6 +3,14 @@
 #include <string.h>
 #include <stdlib.h>
 
+#define FLAG_NO_CRC32 (1 << 2);
+
+static const uint16_t g_flags = 0
+#ifdef NO_CRC32
+ | FLAG_NO_CRC32
+#endif
+;
+
 #pragma once
 
 #ifdef TEST_MAIN
@@ -10,8 +18,11 @@
 #  undef TEST_MAIN
 #endif
 
+#ifndef NO_CRC32
+
 #include "crc32.c"
 
+#endif
 #ifdef HAD_TEST_MAIN_SERIALIZER
 # pragma message("Runninng tests")
 # define TEST_MAIN
@@ -175,11 +186,13 @@ uint32_t Serializer::ReadFlush (void) {
     auto bytes_read = fread(buffer + old_bytes_in_buffer, 1, size_to_read, fd);
     assert(bytes_read == size_to_read);
 
+#ifndef NO_CRC32
     if (crc != invCrc)
     {
         crc = crc32c(crc, buffer + old_bytes_in_buffer, size_to_read);
         invCrc = ~crc;
     }
+#endif
 
     buffer_used = old_bytes_in_buffer + bytes_read;
     position_in_buffer = 0;
@@ -195,12 +208,13 @@ uint32_t Serializer::WriteFlush (void) {
     uint32_t bytes_to_flush = FLUSH_GRANULARITY;
     if (position_in_buffer < bytes_to_flush)
         bytes_to_flush = position_in_buffer;
-
+#ifndef NO_CRC32
     if (crc != invCrc)
     {
         crc = crc32c(crc, buffer, bytes_to_flush);
         invCrc = ~crc;
     }
+#endif
     fwrite(buffer, 1, bytes_to_flush, fd);
 
     position_in_file += bytes_to_flush;
@@ -225,13 +239,16 @@ Serializer::Serializer(const char* filename, serialize_mode_t mode) :
         if (mode == serialize_mode_t::Writing)
         {
             fwrite("OSMb", 4, 1, fd); // write magic number
-            uint32_t versionNumber = 1;
+            uint16_t versionNumber = 1;
             if (ferror(fd))
             {
                 perror("Serializer()");
                 assert(0);
             }
-            fwrite(&versionNumber, sizeof(versionNumber), 1, fd); // write version number
+            fwrite(&versionNumber, sizeof(versionNumber), 2, fd); // write version number
+
+            uint16_t flags = g_flags;
+            fwrite(&versionNumber, sizeof(flags), 1, fd); // write version number
             // placeholder for ~crc;
             uint32_t invCrc = ~crc;
             // NOTE: crc is not valid yet we just write it as a place_holder
@@ -252,8 +269,11 @@ Serializer::Serializer(const char* filename, serialize_mode_t mode) :
             char magic[4];
             bytes_read += fread(&magic, 1, sizeof(magic), fd);
 
-            uint32_t versionNumber;
+            uint16_t versionNumber;
             bytes_read += fread(&versionNumber, 1, sizeof(versionNumber), fd);
+
+            uint16_t flags;
+            bytes_read += fread(&versionNumber, 1, sizeof(flags), fd);
 
             uint32_t r_crc;
             bytes_read += fread(&r_crc, 1, sizeof(r_crc), fd);
@@ -279,6 +299,7 @@ Serializer::~Serializer() {
     {
         WriteFlush();
 
+#ifndef NO_CRC32
         if (crc == invCrc)
         {
             crc = ~0;
@@ -312,10 +333,12 @@ Serializer::~Serializer() {
             uint32_t invCrc_ = ~crc;
             fwrite(&invCrc_, 1, sizeof(invCrc_), fd);
         }
+#endif
     }
     if (m_mode == serialize_mode_t::Reading)
     {
         assert(position_in_file == bytes_in_file);
+#ifndef NO_CRC32
         if (crc == invCrc)
         {
             //TODO recalc crc
@@ -324,6 +347,7 @@ Serializer::~Serializer() {
         {
             assert(~crc == r_invCrc);
         }
+#endif
     }
     fclose(fd);
 }
