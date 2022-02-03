@@ -136,15 +136,40 @@ inline static uint32_t* makeTable(uint32_t* result, uint8_t initValue)
     return result;
 }
 */
+
+#define MIN(A, B) \
+    ((A) < (B) ? (A) : (B))
+
 static inline uint32_t intrinsic_crc32c(uint32_t crc, const void* s, uint32_t len)
 {
     const uint8_t* p = (const uint8_t*) s;
 
-    while(len--)
+    uint8_t sw = MIN( ((size_t)p) & 3, len);
+Lswitch:
+    switch(sw & 3)
     {
-        const uint8_t c = *(p++);
-        crc = __crc32cb(crc, c);
+      case 3:
+        crc = __crc32cb(crc, *p++);
+        len--;
+      case 2:
+        crc = __crc32cb(crc, *p++);
+        len--;
+      case 1:
+        crc = __crc32cb(crc, *p++);
+        len--;
+      default : break;
     }
+
+    while(len >= 4)
+    {
+        crc = __crc32cw(crc, (*(uint32_t*)p));
+        p += 4;
+        len -= 4;
+    }
+    sw = (uint8_t)len;
+  
+    if (len > 0) goto Lswitch;
+
     return crc;
 
 }
@@ -164,58 +189,12 @@ EXTERN_C uint32_t crc32c(uint32_t crc, const void* s, const uint32_t len_p)
 }
 
 #define CRC32C_S(STRING) \
-    (crc32c(~0, STRING, sizeof(STRING) - 1) ^ ~0)
+    (crc32c(~(uint32_t)0, STRING, sizeof(STRING) - 1) ^ ~(uint32_t)0)
 
 #ifdef TEST_MAIN
-#include <stdio.h>
-void printTable(int32_t* table, int n)
-{
-    for(int i = 0; i < 256; i += 8)
-    {
-        printf("  0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x\n",
-            table[i + 0],
-            table[i + 1],
-            table[i + 2],
-            table[i + 3],
-
-            table[i + 4],
-            table[i + 5],
-            table[i + 6],
-            table[i + 7]
-        );
-    }
-}
-
-#include <time.h>
+#include <assert.h>
 int main(int argc, char* argv[])
 {
-    clock_t t1 = clock();
-
-    uint32_t crc32c_test1 = (crc32c(~0, crc32Table, sizeof(crc32Table) + argc - 1) ^ inital_crc32c);
-    uint32_t crc32c_test2 = (crc32c(~0, crc32Table, sizeof(crc32Table) + argc - 1) ^ inital_crc32c);
-    uint32_t crc32c_test3 = (crc32c(~0, crc32Table, sizeof(crc32Table) + argc - 1) ^ inital_crc32c);
-    uint32_t crc32c_test4 = (crc32c(~0, crc32Table, sizeof(crc32Table) + argc - 1) ^ inital_crc32c);
-    uint32_t crc32c_test5 = (crc32c(~0, crc32Table, sizeof(crc32Table) + argc - 1) ^ inital_crc32c);
-    uint32_t crc32c_test6 = (crc32c(~0, crc32Table, sizeof(crc32Table) + argc - 1) ^ inital_crc32c);
-    uint32_t crc32c_test7 = (crc32c(~0, crc32Table, sizeof(crc32Table) + argc - 1) ^ inital_crc32c);
-    uint32_t crc32c_test8 = (crc32c(~0, crc32Table, sizeof(crc32Table) + argc - 1) ^ inital_crc32c);
-    clock_t t2 = clock();
-
-    printf("crc32c of 'hello' is: %x\n", CRC32C_S("hello"));
-
-    printf("clock diff is : %lu\n", t2 - t1);
-
-#  ifdef ARM_NEON_CRC32C
-#define CRC32C_I_S(STRING) \
-    (intrinsic_crc32c(~0, STRING, sizeof(STRING) - 1) ^ ~0)
-
-//     printf("crc32c of 'hello' according to neon is: %x\n", CRC32C_I_S("hello") );
-
-    int32_t t[256];
-
-    // makeTable(t, 0);
-    // printTable(t, 256);
-#  endif // ARM_NEON_CRC32C
-#undef CRC32C_S
+    assert(CRC32C_S("addr:housenumber") == 0x3F233FF2);
 }
-#endif // TEST_MAIN
+#endif
