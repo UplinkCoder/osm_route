@@ -112,7 +112,7 @@ struct Pool
         if (pi.n_allocation_records == LOCAL_RECORDS)
         {
             pi.recordPage = (PoolAllocationRecord*)
-                AllocateNewPages(128);
+                AllocateNewPages(4096);
         }
 
         if (pi.sizeLeftOnCurrentPage >= aligned_size)
