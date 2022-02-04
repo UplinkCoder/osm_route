@@ -22,7 +22,8 @@ using namespace std;
 static const string_view commands[] {
     ":tag_name",
     ":tag_value",
-    ":is_street"
+    ":is_street",
+    ":dump_names"
 };
 
 // lets to a crappy trie
@@ -178,7 +179,7 @@ MAIN
             const auto is_cmd = ((input[0] == ':') ? 1 : 0); 
             const auto input_length = strlen(input + is_cmd);
             const auto input_crc = 
-                crc32c(INITIAL_CRC32C, input + is_cmd, input_length);
+                FINALIZE_CRC32C (crc32c(INITIAL_CRC32C, input + is_cmd, input_length));
  
             if (0 == strcmp(input + is_cmd, "q"))
                 return 0;
@@ -190,7 +191,7 @@ MAIN
                         { \
                             const int32_t arg_len = input_length - sizeof(#S); \
                             const char* arg = ((arg_len > 0) ? input + 1 + sizeof(#S) : 0); \
-                            const auto crc_arg = ((arg_len > 0) ? crc32c(INITIAL_CRC32C, arg, arg_len) : 0); \
+                            const auto crc_arg = ((arg_len > 0) ? (~crc32c(INITIAL_CRC32C, arg, arg_len)) : 0) ; \
                             __VA_ARGS__ \
                         }
                     
@@ -201,6 +202,13 @@ MAIN
                     if (tag_idx)
                     {
                         printf("tag index for '%s' is: '%u'\n", arg, tag_idx);
+                    }
+                })
+
+                CMD(dump_names, {
+                    for(auto& e : ws.tag_names.strings)
+                    {
+                        printf("%s\n", &ws.tag_names.string_data[e.offset]);
                     }
                 })
             }
