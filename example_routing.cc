@@ -96,12 +96,13 @@ struct SerializeWays
     set<uint32_t> street_name_indicies {};
     std::unordered_map<uint64_t, Node> nodes;
     vector<Way> ways;
+    Pool* pool;
 
     // everthing below is just serialisation state
 
-    uint64_t currentBaseNode;
+    uint64_t currentBaseNode = 0;
     uint8_t dependent_nodes[255];
-    uint8_t n_dependent_nodes;
+    uint8_t n_dependent_nodes = 0;
 
     vector<pair<uint64_t, uint8_t> > baseNodes = {};
     vector<vector<uint8_t> > childNodes {};
@@ -111,7 +112,7 @@ struct SerializeWays
         short_tags_t result = {};
         {
             uint32_t idx = 0;
-            result.resize(tags.size());
+            result.AllocFromPool(tags.size(), pool);
 
             for(auto it = tags.begin();
                 it != tags.end();
@@ -412,8 +413,8 @@ struct Routing {
                     if(nodes.at(current_ref).uses > 1) {
                         // Homework: measure the length of the edge
                         uint64_t target = current_ref;
-                        auto src_node = nodes[source];
-                        auto tgt_node = nodes[target];
+                        //auto src_node = nodes[source];
+                        //auto tgt_node = nodes[target];
                         result.push_back(std::make_pair(source, target));
                         source = target;
                     }
@@ -441,6 +442,8 @@ int main(int argc, char** argv) {
 //    std::cout << "The routing graph has " << routing.edges().size() << " edges" << std::endl;
 
     SerializeWays serializeWays;
+    Pool pool {};
+    serializeWays.pool = &pool;
     read_osm_pbf(argv[1], serializeWays);
 
     serializeWays.tag_values.SortUsageCounts();
@@ -490,7 +493,8 @@ int main(int argc, char** argv) {
         Serializer d {"tags.dat", Serializer::serialize_mode_t::Reading};
 
         DeSerializeWays ws;
-        ws.DeSerialize(d);
+        Pool pool {};
+        ws.DeSerialize(d, &pool);
     }
     return 0;
 }
