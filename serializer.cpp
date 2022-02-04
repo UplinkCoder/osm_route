@@ -245,10 +245,10 @@ Serializer::Serializer(const char* filename, serialize_mode_t mode) :
                 perror("Serializer()");
                 assert(0);
             }
-            fwrite(&versionNumber, sizeof(versionNumber), 2, fd); // write version number
+            fwrite(&versionNumber, sizeof(versionNumber), 1, fd); // write version number
 
             uint16_t flags = g_flags;
-            fwrite(&versionNumber, sizeof(flags), 1, fd); // write version number
+            fwrite(&flags, sizeof(flags), 1, fd); // write version number
             // placeholder for ~crc;
             uint32_t invCrc = ~crc;
             // NOTE: crc is not valid yet we just write it as a place_holder
