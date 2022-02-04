@@ -145,9 +145,33 @@ static inline uint32_t intrinsic_crc32c(uint32_t crc, const void* s, uint32_t le
 {
     const uint8_t* p = (const uint8_t*) s;
 
-    uint8_t sw = MIN( ((size_t)p) & 3, len);
-Lswitch:
-    switch(sw & 3)
+
+    if (len > 3)
+    {
+        switch(((size_t)p) & 3)
+        {
+          case 3:
+            crc = __crc32cb(crc, *p++);
+            len--;
+          case 2:
+            crc = __crc32cb(crc, *p++);
+            len--;
+          case 1:
+            crc = __crc32cb(crc, *p++);
+            len--;
+          default : break;
+        }
+
+        while(len >= 4)
+        {
+            crc = __crc32cw(crc, (*(uint32_t*)p));
+            p += 4;
+            len -= 4;
+        }
+    }
+    assert(len <= 3 && (len & 3) == len);
+
+    switch(len & 3)
     {
       case 3:
         crc = __crc32cb(crc, *p++);
@@ -160,16 +184,6 @@ Lswitch:
         len--;
       default : break;
     }
-
-    while(len >= 4)
-    {
-        crc = __crc32cw(crc, (*(uint32_t*)p));
-        p += 4;
-        len -= 4;
-    }
-    sw = (uint8_t)len;
-  
-    if (len > 0) goto Lswitch;
 
     return crc;
 
@@ -199,5 +213,7 @@ EXTERN_C uint32_t crc32c(uint32_t crc, const void* s, const uint32_t len_p)
 int main(int argc, char* argv[])
 {
     assert(CRC32C_S("addr:housenumber") == 0x3F233FF2);
+    assert(CRC32C_S("addr:housenumber") == 0x3F233FF2);
+//    printf("seems to work\n");
 }
 #endif
