@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include "ways.h"
 #include "deserialize.cpp"
+#include <thread>
 #include "3rd_party/linenoise/linenoise.h"
 #include "3rd_party/linenoise/linenoise.c"
 
@@ -150,7 +151,7 @@ MAIN
     if (argc != 2)
     {
         fprintf(stderr, "exactly one argument expected");
-        abort();
+        return 1;
     }
 
     Serializer dser (argv[1], Serializer::serialize_mode_t::Reading);
@@ -178,9 +179,8 @@ MAIN
 
     BuildStreetNameTrie(&pool);
 
-    printf("total_allocated: %u\n", pool.total_allocated);
-    printf("wasted: %u\n", pool.wasted_bytes);
-
+    printf("total_allocated: %10u\n", pool.total_allocated);
+    printf("wasted:          %10u\n", pool.wasted_bytes);
 
     {
         char* input;
