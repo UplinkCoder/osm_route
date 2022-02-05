@@ -31,8 +31,6 @@ struct DeSerializeWays
             uint32_t name_index, value_index;
             serializer.ReadShortUint(&name_index);
             serializer.ReadShortUint(&value_index);
-            auto tags_begin = tags->begin();
-            auto tag_addr = &(*tags)[itag];
             (*tags)[itag] = {name_index, value_index};
         }
     }

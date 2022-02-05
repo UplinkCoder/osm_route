@@ -17,16 +17,22 @@
 #include <iostream>
 #include "halp.h"
 
+#undef MAYBE_UNUSED
+
+#define MAYBE_UNUSED(expr) \
+    do { (void)(expr); } while (0)
+
 using namespace std;
 
 static const string_view commands[] {
     ":tag_name",
     ":tag_value",
     ":is_street",
-    ":dump_names"
+    ":dump_names",
+    ":dump_values"
 };
 
-// lets to a crappy trie
+// lets do a crappy trie
 qSpan<string_view> street_name_trie[27] {};
 qSpan<pair<string_view, uint32_t> > street_names;
 
@@ -34,7 +40,6 @@ static const auto SPECIAL_CHAR_IDX = 26;
 
 #define LOWERCASE(C) \
         (((C) >= 'A' && (C) <= 'Z') ? ((C) + ('a' - 'A')) : (C))
-
 
 void complete (const char * line, linenoiseCompletions * completions)
 {
@@ -93,6 +98,53 @@ void complete (const char * line, linenoiseCompletions * completions)
 }
 
 
+void BuildStreetNameTrie(Pool* pool)
+{
+    // count frequency of starting letters so we know our qSpans
+    uint counts[27] = {};
+
+    for(auto &str : street_names)
+    {
+        if (!str.first.size())
+            continue;
+        const char c = LOWERCASE(str.first[0]);
+        if (c >= 'a' && c <= 'z')
+        {
+            counts[c - 'a']++;
+        }
+        else
+        {
+            counts[SPECIAL_CHAR_IDX]++;
+        }
+    }
+    // preallocate our spans
+    {
+        uint32_t idx = 0;
+        //TODO alloc mutex.
+        for(auto &c : counts)
+        {
+            street_name_trie[idx++].AllocFromPool(c, pool);
+        }
+    }
+    // now fill it
+    for(auto &str : street_names)
+    {
+        if (!str.first.size())
+            continue;
+        const char c = LOWERCASE(str.first[0]);
+        if (c >= 'a' && c <= 'z')
+        {
+            const uint8_t c_idx = c - 'a';
+            street_name_trie[c_idx][--counts[c_idx]] = str.first;
+        }
+        else
+        {
+            const uint8_t c_idx = SPECIAL_CHAR_IDX;
+            street_name_trie[c_idx][--counts[c_idx]] = str.first;
+        }
+    }
+}
+
 MAIN
 {
     if (argc != 2)
@@ -124,52 +176,11 @@ MAIN
         }
     }
 
+    BuildStreetNameTrie(&pool);
+
     printf("total_allocated: %u\n", pool.total_allocated);
     printf("wasted: %u\n", pool.wasted_bytes);
 
-    {
-        // count frequency of starting letters so we know our qSpans
-        uint counts[27] = {};
-        for(auto &str : street_names)
-        {
-            if (!str.first.size())
-                continue;
-            const char c = LOWERCASE(str.first[0]);
-            if (c >= 'a' && c <= 'z')
-            {
-                counts[c - 'a']++;
-            }
-            else
-            {
-                counts[SPECIAL_CHAR_IDX]++;
-            }
-        }
-        // preallocate our spans
-        {
-            uint32_t idx = 0;
-            for(auto &c : counts)
-            {
-                street_name_trie[idx++].AllocFromPool(c, &pool);
-            }
-        }
-        // now fill it
-        for(auto &str : street_names)
-        {
-            if (!str.first.size())
-                continue;
-            const char c = LOWERCASE(str.first[0]);
-            if (c >= 'a' && c <= 'z')
-            {
-                const uint8_t c_idx = c - 'a';
-                street_name_trie[c_idx][--counts[c_idx]] = str.first;
-            }
-            else
-            {
-                const uint8_t c_idx = SPECIAL_CHAR_IDX;
-                street_name_trie[c_idx][--counts[c_idx]] = str.first;
-            }
-        }
-    }
 
     {
         char* input;
@@ -187,21 +198,38 @@ MAIN
             if (is_cmd)
             {
                 #define CMD(S, ... ) \
-                        if(0 == strncmp(#S, input + 1, sizeof(#S) - 1)) \
-                        { \
-                            const int32_t arg_len = input_length - sizeof(#S); \
-                            const char* arg = ((arg_len > 0) ? input + 1 + sizeof(#S) : 0); \
-                            const auto crc_arg = ((arg_len > 0) ? (~crc32c(INITIAL_CRC32C, arg, arg_len)) : 0) ; \
-                            __VA_ARGS__ \
-                        }
+                    if(0 == strncmp(#S, input + 1, sizeof(#S) - 1)) \
+                    { \
+                        const int32_t arg_len = input_length - sizeof(#S); \
+                        const char* arg = ((arg_len > 0) ? input + 1 + sizeof(#S) : 0); \
+                        const auto crc_arg = ((arg_len > 0) ? (~crc32c(INITIAL_CRC32C, arg, arg_len)) : 0) ; \
+                        MAYBE_UNUSED(crc_arg); \
+                        MAYBE_UNUSED(arg); \
+                        __VA_ARGS__ \
+                    }
                     
                 // this is a command
-                CMD(tag_name,{
-                    printf("name arg_len: %d -- '%s'\n", arg_len, arg);
+                CMD(tag_name, {
                     const auto tag_idx = ws.tag_names.LookupString(arg, arg_len, crc_arg);
                     if (tag_idx)
                     {
-                        printf("tag index for '%s' is: '%u'\n", arg, tag_idx);
+                        printf("tag name index for '%s' is: '%u'\n", arg, tag_idx);
+                    }
+                    else
+                    {
+                        printf("No such tag name found\n");
+                    }
+                })
+
+                CMD(tag_value, {
+                    const auto tag_idx = ws.tag_values.LookupString(arg, arg_len, crc_arg);
+                    if (tag_idx)
+                    {
+                        printf("tag value index for '%s' is: '%u'\n", arg, tag_idx);
+                    }
+                    else
+                    {
+                        printf("No such tag name found\n");
                     }
                 })
 
@@ -209,6 +237,13 @@ MAIN
                     for(auto& e : ws.tag_names.strings)
                     {
                         printf("%s\n", &ws.tag_names.string_data[e.offset]);
+                    }
+                })
+
+                CMD(dump_values, {
+                    for(auto& e : ws.tag_values.strings)
+                    {
+                        printf("%s\n", &ws.tag_values.string_data[e.offset]);
                     }
                 })
             }
@@ -231,6 +266,9 @@ typedef struct linenoiseCompletions {
   char **cvec;
 } linenoiseCompletions;
 */
+
+#undef MAYBE_UNUSED
+
 typedef void(linenoiseCompletionCallback)(const char *, linenoiseCompletions *);
 void linenoiseSetCompletionCallback(linenoiseCompletionCallback *);
 void linenoiseAddCompletion(linenoiseCompletions *, const char *);
