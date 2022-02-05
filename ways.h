@@ -5,8 +5,6 @@
 #include <stdio.h>
 #include <assert.h>
 
-#include <sys/mman.h>
-#include <unistd.h>
 #include "pool.c"
 
 using namespace std;

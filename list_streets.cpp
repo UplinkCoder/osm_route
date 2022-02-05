@@ -150,7 +150,7 @@ MAIN
 {
     if (argc != 2)
     {
-        fprintf(stderr, "exactly one argument expected");
+        fprintf(stderr, "exactly one argument expected\n");
         return 1;
     }
 
