@@ -35,7 +35,7 @@ struct qSpan
     const T* end_;
 
     MemoryFlags memoryFlags = MemoryFlags::PoolManaged;
-    PoolAllocationRecord* par;
+    PoolAllocationRecordIndex parIdx;
 
     constexpr const size_t size() const {
         return end_ - begin_;
@@ -110,14 +110,14 @@ struct qSpan
         if (!n)
             return ;
         size_t requested_size = n * sizeof(T);
-        par = pool->Allocate(requested_size);
-        if(!par)
+        parIdx = pool->Allocate(requested_size);
+        if(!parIdx.value)
         {
             assert(!"Allocation failed");
         }
         // else
         {
-            begin_ = (T*)par->startMemory;
+            begin_ = (T*)((pool->recordPage + parIdx.value)->startMemory);
             end_ = begin_ + n;
         }
     }

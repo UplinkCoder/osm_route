@@ -57,16 +57,28 @@ void Pool_Init(Pool* thisP) {
     const uint8_t* first_page = MMAP_SIZE(page_size);
     if (!first_page) perror("mmap");
 
+#define N_INITIAL_RECORD_PAGES (8192 + 8192)
     thisP->recordPage = (PoolAllocationRecord*)
-        Pool_AllocateNewPages(thisP, 4096);
+        Pool_AllocateNewPages(thisP, N_INITIAL_RECORD_PAGES);
+
+    thisP->recordPage->startMemory = (uint8_t*)thisP->recordPage;
+    thisP->recordPage->sizeAllocated = N_INITIAL_RECORD_PAGES * page_size;
+    thisP->recordPage->sizeRequested = N_INITIAL_RECORD_PAGES * page_size;
+    thisP->recordPage->used = 1;
+    thisP->recordPage->pageRangeStart = 1;
+
+    thisP->n_allocation_records = 1;
+    thisP->recordsLeft = ((N_INITIAL_RECORD_PAGES * page_size) / sizeof(PoolAllocationRecord)) - 1;
+    thisP->allocatedRecordPages = N_INITIAL_RECORD_PAGES;
 
     thisP->allocationAreaStart =
         (uint8_t*)Align16((size_t)first_page);
 
     thisP->sizeLeftOnCurrentPage = page_size;
+#undef N_INITIAL_RECORD_PAGES
 }
 
-PoolAllocationRecord* Pool_Allocate(Pool* thisP, uint32_t requested_size)
+PoolAllocationRecordIndex Pool_Allocate(Pool* thisP, uint32_t requested_size)
 {
     uint8_t* memory = nullptr;
     uint8_t pageRangeStart = 0;
@@ -75,9 +87,25 @@ PoolAllocationRecord* Pool_Allocate(Pool* thisP, uint32_t requested_size)
     // const auto opr = pi.n_allocation_records;
     // const auto ope = pi.n_allocated_extra_pages;
 
-    PoolAllocationRecord* result =
-        ((PoolAllocationRecord*)thisP->recordPage) +
-            (thisP->n_allocation_records++);
+    PoolAllocationRecordIndex result =
+        {thisP->n_allocation_records++};
+
+    if (thisP->recordsLeft-- == 0)
+    {
+#define GROWTH_FACTOR 1.6
+        uint32_t oldSize = (thisP->allocatedRecordPages * page_size);
+
+        PoolAllocationRecord par = *thisP->recordPage;
+        uint32_t newSize = ((uint32_t)(thisP->allocatedRecordPages * GROWTH_FACTOR) * page_size);
+        PoolAllocationRecord* newPar = Pool_Reallocate(thisP, thisP->recordPage, newSize);
+
+        thisP->recordsLeft = (newSize - oldSize)  / sizeof(PoolAllocationRecord);
+        thisP->allocatedRecordPages = newSize / page_size;
+
+        thisP->recordPage = (PoolAllocationRecord*) newPar->startMemory;
+        *thisP->recordPage = *newPar;
+#undef GROWTH_FACTOR
+    }
 
     if (thisP->sizeLeftOnCurrentPage >= aligned_size)
     {
@@ -113,48 +141,61 @@ PoolAllocationRecord* Pool_Allocate(Pool* thisP, uint32_t requested_size)
         }
     }
 
-    if (result)
+    if (result.value)
     {
+        PoolAllocationRecord* parp = thisP->recordPage + result.value;
+
         thisP->wasted_bytes += (aligned_size - requested_size);
         thisP->total_allocated += aligned_size;
         assert(memory);
-        result->startMemory      = memory;
-        result->sizeRequested    = requested_size;
-        result->sizeAllocated    = aligned_size;
-        result->used             = true;
-        result->pageRangeStart = pageRangeStart;
+        parp->startMemory      = memory;
+        parp->sizeRequested    = requested_size;
+        parp->sizeAllocated    = aligned_size;
+        parp->used             = true;
+        parp->pageRangeStart   = pageRangeStart;
         assert(result->sizeAllocated >= result->sizeRequested);
     }
 
     return result;
 }
 
-PoolAllocationRecord* Pool_Reallocate(Pool* thisP, PoolAllocationRecord* par,
+PoolAllocationRecord* Pool_Reallocate(Pool* thisP, PoolAllocationRecord* parp,
                                       uint32_t requested_new_size)
 {
     PoolAllocationRecord* result = nullptr;
 
-    if (par->sizeAllocated >= requested_new_size)
+    if (parp->sizeAllocated >= requested_new_size)
     {
         thisP->wasted_bytes -=
-            (requested_new_size - par->sizeRequested);
-        par->sizeRequested = requested_new_size;
-        result = par;
+            (requested_new_size - parp->sizeRequested);
+        parp->sizeRequested = requested_new_size;
+        result = parp;
     }
-    else if(par->pageRangeStart)
+    else if(parp->pageRangeStart)
     {
         size_t new_size = ((requested_new_size + page_size) / page_size) * page_size;
-        void* new_mem = mremap((void*)par->startMemory, par->sizeAllocated,
+        void* new_mem = mremap((void*)parp->startMemory, parp->sizeAllocated,
             new_size, MREMAP_MAYMOVE);
         if (new_mem == MAP_FAILED)
         {
             perror("mremap failed");
         }
+        else
+        {
+            if (parp == thisP->recordPage)
+            {
+                parp = (PoolAllocationRecord*) new_mem;
+            }
+
+            parp->sizeRequested = requested_new_size;
+            parp->sizeAllocated = new_size;
+            parp->startMemory = (uint8_t*)new_mem;
+            result = parp;
+        }
     }
 
     return result;
 }
-#undef LOCAL_RECORDS
 #else
 #error("Platform not supported")
 #endif
@@ -165,7 +206,7 @@ Pool::Pool()
     Pool_Init(this);
 }
 
-PoolAllocationRecord* Pool::Allocate(size_t requested_size)
+PoolAllocationRecordIndex Pool::Allocate(size_t requested_size)
 {
     return Pool_Allocate(this, requested_size);
 }

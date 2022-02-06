@@ -50,7 +50,7 @@ void complete (const char * line, linenoiseCompletions * completions)
         char completion_buffer[128];
         for(const auto& c : commands)
         {
-            if (strcasecmp(line, c.data()))
+            if (strncasecmp(line, c.data(), len) == 0)
             {
                 int i = 0;
                 for(const char *cc = c.data(); *cc; i++, cc++)
@@ -67,7 +67,7 @@ void complete (const char * line, linenoiseCompletions * completions)
                 }
                 else
                 {
-                    
+
                 }
             }
         }
@@ -187,11 +187,11 @@ MAIN
         linenoiseSetCompletionCallback(&complete);
         while( (input = linenoise("> ")) != NULL )
         {
-            const auto is_cmd = ((input[0] == ':') ? 1 : 0); 
+            const auto is_cmd = ((input[0] == ':') ? 1 : 0);
             const auto input_length = strlen(input + is_cmd);
-            const auto input_crc = 
+            const auto input_crc =
                 FINALIZE_CRC32C (crc32c(INITIAL_CRC32C, input + is_cmd, input_length));
- 
+
             if (0 == strcmp(input + is_cmd, "q"))
                 return 0;
 
@@ -207,8 +207,14 @@ MAIN
                         MAYBE_UNUSED(arg); \
                         __VA_ARGS__ \
                     }
-                    
+
                 // this is a command
+                CMD(help, {
+                    printf("known command are:\n");
+                    for(auto &c : commands)
+                        printf("\t%.*s\n", (int)c.size(), c.data());
+                })
+
                 CMD(tag_name, {
                     const auto tag_idx = ws.tag_names.LookupString(arg, arg_len, crc_arg);
                     if (tag_idx)
@@ -246,6 +252,10 @@ MAIN
                         printf("%s\n", &ws.tag_values.string_data[e.offset]);
                     }
                 })
+
+                else {
+                    printf("Command unknown\n");
+                }
             }
             #undef CMD
             else
