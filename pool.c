@@ -57,7 +57,7 @@ void Pool_Init(Pool* thisP) {
     const uint8_t* first_page = MMAP_SIZE(page_size);
     if (!first_page) perror("mmap");
 
-#define N_INITIAL_RECORD_PAGES (8192 + 8192)
+#define N_INITIAL_RECORD_PAGES (4096)
     thisP->recordPage = (PoolAllocationRecord*)
         Pool_AllocateNewPages(thisP, N_INITIAL_RECORD_PAGES);
 
@@ -153,7 +153,7 @@ PoolAllocationRecordIndex Pool_Allocate(Pool* thisP, uint32_t requested_size)
         parp->sizeAllocated    = aligned_size;
         parp->used             = true;
         parp->pageRangeStart   = pageRangeStart;
-        assert(result->sizeAllocated >= result->sizeRequested);
+        assert(parp->sizeAllocated >= parp->sizeRequested);
     }
 
     return result;

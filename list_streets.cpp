@@ -26,6 +26,7 @@
 using namespace std;
 
 static const string_view commands[] {
+    ":help",
     ":tag_name",
     ":tag_value",
     ":is_street",
@@ -200,6 +201,7 @@ MAIN
                 #define CMD(S, ... ) \
                     if(0 == strncmp(#S, input + 1, sizeof(#S) - 1)) \
                     { \
+                        linenoiseHistoryAdd(input); \
                         const int32_t arg_len = input_length - sizeof(#S); \
                         const char* arg = ((arg_len > 0) ? input + 1 + sizeof(#S) : 0); \
                         const auto crc_arg = ((arg_len > 0) ? (~crc32c(INITIAL_CRC32C, arg, arg_len)) : 0) ; \
@@ -209,12 +211,6 @@ MAIN
                     }
 
                 // this is a command
-                CMD(help, {
-                    printf("known command are:\n");
-                    for(auto &c : commands)
-                        printf("\t%.*s\n", (int)c.size(), c.data());
-                })
-
                 CMD(tag_name, {
                     const auto tag_idx = ws.tag_names.LookupString(arg, arg_len, crc_arg);
                     if (tag_idx)
@@ -251,6 +247,12 @@ MAIN
                     {
                         printf("%s\n", &ws.tag_values.string_data[e.offset]);
                     }
+                })
+
+                CMD(help, {
+                    printf("known command are:\n");
+                    for(auto &c : commands)
+                        printf("\t%.*s\n", (int)c.size(), c.data());
                 })
 
                 else {
