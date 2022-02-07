@@ -117,6 +117,8 @@
 #include <unistd.h>
 #include "linenoise.h"
 
+#include "ocaml_community_mod.c"
+
 #ifdef __cplusplus
 #  define CCHAR const char
 #else
@@ -725,6 +727,8 @@ void linenoiseEditMoveEnd(struct linenoiseState *l) {
     }
 }
 
+LINENOISE_MOVE_WORD_FUNCTIONS
+
 /* Substitute the currently edited line with the next or previous history
  * entry as specified by 'dir'. */
 #define LINENOISE_HISTORY_NEXT 0
@@ -827,8 +831,9 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
     while(1) {
         char c;
         int nread;
-        char seq[3];
-
+        //char seq[3];
+        //ocaml_community_mod
+        char seq[5];
         nread = read(l.ifd,&c,1);
         if (nread <= 0) return l.len;
 
@@ -913,6 +918,7 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
                             linenoiseEditDelete(&l);
                             break;
                         }
+                        LINENOISE_TAB_CURSOR_ESCAPE_SEQUENCE_HANDLING
                     }
                 } else {
                     switch(seq[1]) {

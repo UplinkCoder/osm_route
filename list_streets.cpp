@@ -15,7 +15,6 @@
 #  include <string_view>
 #endif
 
-#include <iostream>
 #include "halp.h"
 
 #undef MAYBE_UNUSED
@@ -26,12 +25,13 @@
 using namespace std;
 
 static const string_view commands[] {
-    ":help",
-    ":tag_name",
-    ":tag_value",
-    ":is_street",
-    ":dump_names",
-    ":dump_values"
+    ":help"
+  , ":tag_name"
+  , ":tag_value"
+  , ":is_street"
+  , ":dump_names"
+  , ":dump_values"
+  , ":pages"
 };
 
 // lets do a crappy trie
@@ -208,6 +208,7 @@ MAIN
                         MAYBE_UNUSED(crc_arg); \
                         MAYBE_UNUSED(arg); \
                         __VA_ARGS__ \
+                        continue; \
                     }
 
                 // this is a command
@@ -253,6 +254,11 @@ MAIN
                     printf("known command are:\n");
                     for(auto &c : commands)
                         printf("\t%.*s\n", (int)c.size(), c.data());
+                })
+
+                CMD(pages, {
+                    printf("number of allocated pages: %d \t record pages %d \n",
+                        pool.n_allocated_extra_pages, pool.allocatedRecordPages);
                 })
 
                 else {
