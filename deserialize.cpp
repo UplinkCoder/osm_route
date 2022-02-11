@@ -2,10 +2,37 @@
 #include "string_table.cpp"
 #include "ways.h"
 
+#define PERF_PRINTOUT 1
 #undef MAYBE_UNUSED
 
 #define MAYBE_UNUSED(expr) \
     do { (void)(expr); } while (0)
+
+typedef struct Offsets
+{
+} Offsets;
+
+qSpan<uint32_t> Derserialize_StreetName_indicies(Serializer& serializer
+                                    , Pool* pool
+                                    , uint32_t street_names_offset)
+{
+    qSpan<uint32_t> street_name_indicies;
+    const auto old_pos = serializer.SetPosition(street_names_offset);
+
+    uint32_t n_street_names = serializer.ReadU32();
+    street_name_indicies.AllocFromPool(n_street_names, pool);
+
+    for (uint32_t i = 0;
+        i < n_street_names;
+        i++)
+    {
+        serializer.ReadShortUint(&street_name_indicies[i]);
+        // printf("street_name: %s\n", tag_values[value].data());
+    }
+    // printf("Read %d street_name_indicies\n", street_name_indicies.size());
+
+    serializer.SetPosition(old_pos);
+}
 
 struct DeSerializeWays
 {
@@ -58,7 +85,7 @@ struct DeSerializeWays
                 tag_values.DeSerialize(serializer);
             }
             clock_t deserialize_tags_end = clock();
-#if 0
+#if PERF_PRINTOUT
             printf("deserialisation of tags took %f milliseconds\n",
                 ((deserialize_tags_end - deserialize_tags_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
 #endif
@@ -81,7 +108,7 @@ struct DeSerializeWays
                 // printf("Read %d street_name_indicies\n", street_name_indicies.size());
              }
             clock_t deserialize_street_names_end = clock();
-#if 0
+#if PERF_PRINTOUT
             printf("deserialisation of street names took %f milliseconds\n",
                 ((deserialize_street_names_end - deserialize_street_names_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
 #endif
@@ -129,7 +156,7 @@ struct DeSerializeWays
                 }
             }
             clock_t deserialize_nodes_end = clock();
-#if 0
+#if PERF_PRINTOUT
             printf("deserialisation of nodes took %f milliseconds\n",
                 ((deserialize_nodes_end - deserialize_nodes_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
 #endif
@@ -188,7 +215,7 @@ struct DeSerializeWays
             }
         }
         clock_t deserialize_ways_end = clock();
-#if 0
+#if PERF_PRINTOUT
         printf("deserialisation of ways took %f milliseconds\n",
             ((deserialize_ways_end - deserialize_ways_begin) / (double)CLOCKS_PER_SEC) * 1000.0f);
 #endif

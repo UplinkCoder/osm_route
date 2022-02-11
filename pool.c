@@ -17,14 +17,6 @@ static CONSTEXPR size_t Align16(size_t n) {
     return (n + 15) & ~15;
 }
 
-#ifdef __cplusplus
-static_assert(Align16(32) == 32);
-static_assert(Align16(30) == 32);
-static_assert(Align16(7) == 16);
-static_assert(Align16(15) == 16);
-static_assert(Align16(0) == 0);
-#endif
-
 #ifndef __cplusplus
 #  define true 1
 #  define nullptr ((void*)0)
